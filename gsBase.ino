@@ -1,15 +1,14 @@
 #include <utility/w5100.h>
 #include <Ethernet.h>               //http://arduino.cc/en/Reference/Ethernet
-#include <ds18b20.h>                //http://github.com/JChristensen/ds18b20
+#include <MCP980X.h>
+#include <MCP79412RTC.h>            //http://github.com/JChristensen/MCP79412RTC
 #include <MemoryFree.h>             //http://playground.arduino.cc/Code/AvailableMemory
 #include <movingAvg.h>              //http://github.com/JChristensen/movingAvg
 #include <NTP.h>
-#include <OneWire.h>                //http://www.pjrc.com/teensy/td_libs_OneWire.html
 #include <SPI.h>                    //http://arduino.cc/en/Reference/SPI
 #include <Streaming.h>              //http://arduiniana.org/libraries/streaming/
 #include <Time.h>                   //http://www.arduino.cc/playground/Code/Time
 #include <Timezone.h>               //https://github.com/JChristensen/Timezone
-#include "hbLED.h"
 #include "GroveStreams.h"
 
 //pin assignments
@@ -28,9 +27,7 @@ TimeChangeRule myDST = { "EDT", Second, Sun, Mar, 2, -240};    //Daylight time =
 TimeChangeRule mySTD = { "EST", First, Sun, Nov, 2, -300};     //Standard time = UTC - 5 hours
 Timezone myTZ(myDST, mySTD);
 
-hbLED hb(GRN_LED, 100, 900);
 EthernetClient client;
-DS18B20 ds(DS_PIN);
 int txSec = 10;            //transmit data once per minute, on this second
 
 char gsServer[] = "grovestreams.com";
@@ -69,10 +66,12 @@ void setup(void)
     digitalWrite(WIZ_RESET, HIGH);
     Serial << millis() << F(" WIZnet module reset") << endl;
     delay(500);
-    Ethernet.begin(macIP, macIP + 2, GATEWAY, GATEWAY, SUBNET);
+    Ethernet.begin(rtcID + 2);    //DHCP
     Serial << millis() << F(" Ethernet started, IP=") << Ethernet.localIP() << endl;
     NTP.begin();
     GS.begin();
+    mcp9802.begin();
+    mcp9802.writeConfig(ADC_RES_12BITS);
 }
 
 enum STATE_t { INIT, RUN } STATE;
