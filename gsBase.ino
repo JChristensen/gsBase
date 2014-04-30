@@ -9,18 +9,14 @@
 #include <Streaming.h>              //http://arduiniana.org/libraries/streaming/
 #include <Time.h>                   //http://www.arduino.cc/playground/Code/Time
 #include <Timezone.h>               //https://github.com/JChristensen/Timezone
+#include <Wire.h>                   //http://arduino.cc/en/Reference/Wire
 #include "GroveStreams.h"
 
 //pin assignments
 const uint8_t WIZ_RESET = 9;            //WIZnet module reset pin
-const uint8_t DS_PIN = A1;              //DS18B20 temperature sensor
-const uint8_t GRN_LED = A2;             //heartbeat LED
-const uint8_t RED_LED = A3;             //waiting for server response
-
-//network settings
-uint8_t macIP[] = { 2, 0, 192, 168, 0, 201 };    //mac and ip addresses, ip is last four bytes
-const IPAddress GATEWAY(192, 168, 0, 1);
-const IPAddress SUBNET(255, 255, 255, 0);
+const uint8_t HB_LED = A1;              //heartbeat LED
+const uint8_t NTP_LED = A2;             //ntp time sync
+const uint8_t WAIT_LED = A2;            //waiting for server response
 
 //US Eastern Time Zone (New York, Detroit)
 TimeChangeRule myDST = { "EDT", Second, Sun, Mar, 2, -240};    //Daylight time = UTC - 4 hours
@@ -36,7 +32,9 @@ char* PROGMEM gsApiKey = "cbc8d222-6f25-3e26-9f6e-edfc3364d7fd";
 char* PROGMEM gsCompID = "192.168.0.201";
 char* PROGMEM gsCompName = "Test-2";
 
-GroveStreams GS(gsServer, gsOrgID, gsApiKey, gsCompID, gsCompName, RED_LED);
+GroveStreams GS(gsServer, gsOrgID, gsApiKey, gsCompID, gsCompName, WAIT_LED);
+MCP980X mcp9802(0);
+movingAvg avgTemp; 
 
 //trap the MCUSR value after reset to determine the reset source
 //and ensure the watchdog is reset. this code does not work with a bootloader.
@@ -51,10 +49,16 @@ void wdt_init(void)
     wdt_disable();
 }
 
+time_t utc;                //current utc time
+
 void setup(void)
 {
+    uint8_t rtcID[8];
+
     pinMode(WIZ_RESET, OUTPUT);
-    pinMode(RED_LED, OUTPUT);
+    pinMode(HB_LED, OUTPUT);
+    pinMode(NTP_LED, OUTPUT);
+    pinMode(WAIT_LED, OUTPUT);
     Serial.begin(115200);
     Serial << endl << millis() << F(" MCU reset 0x0") << _HEX(mcusr);
     if (mcusr & _BV(WDRF))  Serial << F(" WDRF");
@@ -65,7 +69,23 @@ void setup(void)
     delay(1);
     digitalWrite(WIZ_RESET, HIGH);
     Serial << millis() << F(" WIZnet module reset") << endl;
-    delay(500);
+    if ( (utc = RTC.get()) > 0 ) {
+        setTime(utc);
+        RTC.calibWrite( (int8_t)RTC.eepromRead(127) );
+        RTC.idRead(rtcID);
+        Serial << endl << F("RTC ID = ");
+        for (int i=0; i<8; ++i) {
+            if (rtcID[i] < 16) Serial << '0';
+            Serial << _HEX(rtcID[i]);
+        }
+        Serial << endl;
+        Serial << F("UTC set from RTC: ");
+        printDateTime(utc);
+    }
+    else {
+        Serial << F("RTC FAIL!") << endl;
+    }        
+    delay(500);                   //allow some time for the ethernet chip to boot up
     Ethernet.begin(rtcID + 2);    //DHCP
     Serial << millis() << F(" Ethernet started, IP=") << Ethernet.localIP() << endl;
     NTP.begin();
@@ -84,12 +104,10 @@ void loop(void)
     static time_t nextTransmit;          //time for next data transmission
     static time_t nextTimePrint;         //next time to print the local time to serial
     char buf[96];
-    static int tF10;
     static uint8_t socketsAvailable;
 
     NTP.run();                           //run the NTP state machine
-    hb.type(NTP.syncStatus == STATUS_RECD ? HB_LONG : HB_SHORT);
-    hb.update();
+    digitalWrite(NTP_LED, NTP.syncStatus == STATUS_RECD);
 
     switch (STATE) {
 
@@ -104,14 +122,21 @@ void loop(void)
 
     case RUN:
         utc = now();
-        if (utc != utcLast) {
+        if (utc != utcLast) {                 //once-per-second processing 
             utcLast = utc;
             local = myTZ.toLocal(utc);
-            ds.readSensor(second(utc));
+            
+            int tF10 = mcp9802.readTempF10(AMBIENT);
+            if ( second(utc) % 10 == 0 ) {    //read temperature every 10 sec
+                avgTemp.reading( tF10 );
+            }
 
-            if (utc >= nextTransmit) {              //once-per-minute transmission window?
+            if (utc >= nextTransmit) {        //time to send data?
                 nextTransmit += 60;
-                sprintf(buf,"&1=%u&2=%lu&3=%lu&4=%lu&5=%u&6=%u&7=%u&8=%u&9=%i.%i&A=%u", GS.seq, GS.connTime, GS.respTime, GS.discTime, GS.success, GS.fail, GS.timeout, GS.freeMem, tF10/10, tF10%10, socketsAvailable);
+                int t1 = avgTemp.getAvg();
+                int t2 = t1 % 10;
+                t1 /= 10;
+                sprintf(buf,"&1=%u&2=%lu&3=%lu&4=%lu&5=%u&6=%u&7=%u&8=%u&9=%i.%i&A=%u", GS.seq, GS.connTime, GS.respTime, GS.discTime, GS.success, GS.fail, GS.timeout, GS.freeMem, t1, t2, socketsAvailable);
                 if ( !GS.send(buf) ) {
                     Serial << F("Post FAIL");
                     ++GS.fail;
@@ -121,9 +146,8 @@ void loop(void)
                     ++GS.success;
                 }
                 ++GS.seq;
-                tF10 = ds.avgTF10;
                 Serial << F(" seq=") << GS.seq << F(" connTime=") << GS.connTime << F(" respTime=") << GS.respTime << F(" discTime=") << GS.discTime << F(" success=") << GS.success;
-                Serial << F(" fail=") << GS.fail << F(" timeout=") << GS.timeout << F(" Sock=") << socketsAvailable << F(" freeMem=") << GS.freeMem << F(" tempF=") << tF10 << endl;
+                Serial << F(" fail=") << GS.fail << F(" timeout=") << GS.timeout << F(" Sock=") << socketsAvailable << F(" freeMem=") << GS.freeMem << F(" tempF=") << t1 << '.' << t2 << endl;
             }
 
             if (utc >= nextTimePrint) {             //print time to Serial once per minute
