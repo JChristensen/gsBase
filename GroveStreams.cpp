@@ -24,6 +24,9 @@ uint8_t GroveStreams::begin(void)
     }
 }
 
+//to do: differentiate additional statuses
+//connect fail -- put fail (200 OK not recd) -- timeout -- ???
+//status 0 = ok, !0 = error
 uint8_t GroveStreams::send(char* data)
 {
     const char httpOK[16] = "HTTP/1.1 200 OK";
@@ -56,7 +59,7 @@ uint8_t GroveStreams::send(char* data)
         while(int nChar = client.available()) {
             msLastPacket = millis();
             Serial << msLastPacket << F(" received packet ") << nChar << endl;
-            char* b = data;
+            char* b = data;    //use the caller's buffer
             for (int i=0; i<nChar; i++) {
                 char ch = client.read();
                 Serial << _BYTE(ch);

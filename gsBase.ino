@@ -1,11 +1,12 @@
-#include <ds18b20.h>                //http://github.com/JChristensen/ds18b20
-#include <Streaming.h>              //http://arduiniana.org/libraries/streaming/
+#include <utility/w5100.h>
 #include <Ethernet.h>               //http://arduino.cc/en/Reference/Ethernet
+#include <ds18b20.h>                //http://github.com/JChristensen/ds18b20
 #include <MemoryFree.h>             //http://playground.arduino.cc/Code/AvailableMemory
 #include <movingAvg.h>              //http://github.com/JChristensen/movingAvg
 #include <NTP.h>
 #include <OneWire.h>                //http://www.pjrc.com/teensy/td_libs_OneWire.html
 #include <SPI.h>                    //http://arduino.cc/en/Reference/SPI
+#include <Streaming.h>              //http://arduiniana.org/libraries/streaming/
 #include <Time.h>                   //http://www.arduino.cc/playground/Code/Time
 #include <Timezone.h>               //https://github.com/JChristensen/Timezone
 #include "hbLED.h"
@@ -85,6 +86,7 @@ void loop(void)
     static time_t nextTimePrint;         //next time to print the local time to serial
     char buf[96];
     static int tF10;
+    static uint8_t socketsAvailable;
 
     NTP.run();                           //run the NTP state machine
     hb.type(NTP.syncStatus == STATUS_RECD ? HB_LONG : HB_SHORT);
@@ -110,7 +112,7 @@ void loop(void)
 
             if (utc >= nextTransmit) {              //once-per-minute transmission window?
                 nextTransmit += 60;
-                sprintf(buf,"&1=%u&2=%lu&3=%lu&4=%lu&5=%u&6=%u&7=%u&8=%u&9=%i.%i", GS.seq, GS.connTime, GS.respTime, GS.discTime, GS.success, GS.fail, GS.timeout, GS.freeMem, tF10/10, tF10%10);
+                sprintf(buf,"&1=%u&2=%lu&3=%lu&4=%lu&5=%u&6=%u&7=%u&8=%u&9=%i.%i&A=%u", GS.seq, GS.connTime, GS.respTime, GS.discTime, GS.success, GS.fail, GS.timeout, GS.freeMem, tF10/10, tF10%10, socketsAvailable);
                 if ( !GS.send(buf) ) {
                     Serial << F("Post FAIL");
                     ++GS.fail;
@@ -122,15 +124,67 @@ void loop(void)
                 ++GS.seq;
                 tF10 = ds.avgTF10;
                 Serial << F(" seq=") << GS.seq << F(" connTime=") << GS.connTime << F(" respTime=") << GS.respTime << F(" discTime=") << GS.discTime << F(" success=") << GS.success;
-                Serial << F(" fail=") << GS.fail << F(" timeout=") << GS.timeout << F(" freeMem=") << GS.freeMem << F(" tempF=") << tF10 << endl;
+                Serial << F(" fail=") << GS.fail << F(" timeout=") << GS.timeout << F(" Sock=") << socketsAvailable << F(" freeMem=") << GS.freeMem << F(" tempF=") << tF10 << endl;
             }
 
             if (utc >= nextTimePrint) {             //print time to Serial once per minute
                 Serial << endl << millis() << F(" Local: ");
                 printDateTime(local);
                 nextTimePrint += 60;
+                socketsAvailable = showSockStatus();
+                Serial << millis() << ' ' << socketsAvailable << F(" Sockets available") << endl;
             }
         }
         break;
     }
+}
+
+byte socketStat[MAX_SOCK_NUM];
+
+//status values
+//class SnSR {
+//public:
+//  static const uint8_t CLOSED      = 0x00;
+//  static const uint8_t INIT        = 0x13;
+//  static const uint8_t LISTEN      = 0x14;
+//  static const uint8_t SYNSENT     = 0x15;
+//  static const uint8_t SYNRECV     = 0x16;
+//  static const uint8_t ESTABLISHED = 0x17;
+//  static const uint8_t FIN_WAIT    = 0x18;
+//  static const uint8_t CLOSING     = 0x1A;
+//  static const uint8_t TIME_WAIT   = 0x1B;
+//  static const uint8_t CLOSE_WAIT  = 0x1C;
+//  static const uint8_t LAST_ACK    = 0x1D;
+//  static const uint8_t UDP         = 0x22;
+//  static const uint8_t IPRAW       = 0x32;
+//  static const uint8_t MACRAW      = 0x42;
+//  static const uint8_t PPPOE       = 0x5F;
+//};
+
+uint8_t showSockStatus()
+{
+    uint8_t nAvailable = 0;
+    
+    for (int i = 0; i < MAX_SOCK_NUM; i++) {
+        Serial.print(F("Socket#"));
+        Serial.print(i);
+        uint8_t s = W5100.readSnSR(i);
+        socketStat[i] = s;
+        if ( s == 0 ) ++nAvailable;
+        Serial.print(F(":0x"));
+        Serial.print(s,16);
+        Serial.print(F(" "));
+        Serial.print(W5100.readSnPORT(i));
+        Serial.print(F(" D:"));
+        uint8_t dip[4];
+        W5100.readSnDIPR(i, dip);
+        for (int j=0; j<4; j++) {
+          Serial.print(dip[j],10);
+          if (j<3) Serial.print(".");
+        }
+        Serial.print(F("("));
+        Serial.print(W5100.readSnDPORT(i));
+        Serial.println(F(")"));
+      }
+    return nAvailable;
 }

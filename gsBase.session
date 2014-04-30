@@ -1,0 +1,12 @@
+<NotepadPlus>
+    <Session activeView="0">
+        <mainView activeIndex="0">
+            <File firstVisibleLine="0" xOffset="0" scrollWidth="1160" startPos="0" endPos="0" selMode="0" lang="C++" encoding="-1" filename="C:\Users\Jack\Documents\arduino\sketchbook\gsBase\gsBase.ino" />
+            <File firstVisibleLine="0" xOffset="0" scrollWidth="1" startPos="0" endPos="0" selMode="0" lang="C++" encoding="-1" filename="C:\Users\Jack\Documents\arduino\sketchbook\gsBase\GroveStreams.cpp" />
+            <File firstVisibleLine="0" xOffset="0" scrollWidth="1160" startPos="0" endPos="0" selMode="0" lang="C++" encoding="-1" filename="C:\Users\Jack\Documents\arduino\sketchbook\gsBase\GroveStreams.h" />
+            <File firstVisibleLine="0" xOffset="0" scrollWidth="1" startPos="0" endPos="0" selMode="0" lang="C++" encoding="-1" filename="C:\Users\Jack\Documents\arduino\sketchbook\gsBase\hbLED.cpp" />
+            <File firstVisibleLine="0" xOffset="0" scrollWidth="544" startPos="0" endPos="0" selMode="0" lang="C++" encoding="-1" filename="C:\Users\Jack\Documents\arduino\sketchbook\gsBase\hbLED.h" />
+        </mainView>
+        <subView activeIndex="0" />
+    </Session>
+</NotepadPlus>
