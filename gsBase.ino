@@ -30,7 +30,6 @@ Timezone myTZ(myDST, mySTD);
 EthernetClient client;
 int txSec = 10;                         //transmit data once per minute, on this second
 time_t utc, utcLast;
-volatile time_t isrUTC;                 //ISR's copy of UTC
 
 char gsServer[] = "grovestreams.com";
 char* PROGMEM gsOrgID = "66d58106-8c04-34d9-9e8c-17499a8942d7";
@@ -87,26 +86,14 @@ void setup(void)
 
     //set up RTC synchronization
     lcd << F("RTC SYNC");
-    utcLast = RTC.get();                   //try to read the time from the RTC
-    if ( utcLast == 0 ) {                  //couldn't read it, something wrong
+    utc = RTC.get();                       //try to read the time from the RTC
+    if ( utc == 0 ) {                      //couldn't read it, something wrong
         lcd << F(" FAIL");
         digitalWrite( WAIT_LED, HIGH);
         while (1);
     }
-    RTC.set(utcLast);                      //start the rtc if not running
+    RTC.set(utc);                          //start the rtc if not running
     RTC.squareWave(SQWAVE_1_HZ);
-    EICRA = _BV(ISC21);                    //INT2 on falling edge
-    EIFR |= _BV(INTF2);                    //ensure interrupt flag is cleared
-    EIMSK |= _BV(INT2);                    //enable INT2
-
-    //wait for the first interrupt
-    utcLast = utcNow();
-    while (utcLast == utcNow()) delay(10);
-    utc = RTC.get();
-    ATOMIC_BLOCK(ATOMIC_RESTORESTATE) {
-        isrUTC = utc;
-    }
-    setTime(utc);
 #if defined(MCP79412RTC_h)
     RTC.calibWrite( (int8_t)RTC.eepromRead(127) );
     RTC.idRead(rtcID);
@@ -118,11 +105,8 @@ void setup(void)
         if (rtcID[i] < 16) lcd << '0';
         lcd << _HEX( rtcID[i] );
     }
-    Serial << F("UTC set from RTC: ");
-    printDateTime(utc);
-
-    delay(1000);                   //allow some time for the ethernet chip to boot up
-    Ethernet.begin(rtcID + 2);    //DHCP
+    delay(1000);                           //allow some time for the ethernet chip to boot up
+    Ethernet.begin(rtcID + 2);             //DHCP
     Serial << millis() << F(" Ethernet started, IP=") << Ethernet.localIP() << endl;
     lcd.clear();
     lcd << F("Ethernet IP:");
@@ -134,12 +118,17 @@ void setup(void)
     lcd << F("NTP Server IP:");
     lcd.setCursor(0, 1);
     lcd << NTP.serverIP;
+    utc = RTC.get();
+    NTP.setTime(utc);
+    Serial << millis() << F(" System time set from RTC: ") << endl;
+    printDateTime(utc);
+
     delay(1000);
     lcd.clear();
     GS.begin();
     lcd << F("GroveStreams IP:");
     lcd.setCursor(0, 1);
-    lcd << NTP.serverIP;
+    lcd << GS.serverIP;
     delay(1000);
     lcd.clear();
 }
@@ -157,15 +146,6 @@ void loop(void)
     static uint8_t utcS, utcM;
 
     bool ntpSync = NTP.run();            //run the NTP state machine
-    if ( ntpSync ) {
-        utc = now();
-        ATOMIC_BLOCK(ATOMIC_RESTORESTATE) {    //sync time and RTC if NTP time was received
-            isrUTC = utc;
-        }
-        RTC.set(utc);
-        Serial << millis() << F(" ***NTP Time Sync ");
-        printDateTime(utc);
-    }
     digitalWrite(NTP_LED, NTP.syncStatus == STATUS_RECD);
 
     switch (STATE) {
@@ -177,22 +157,13 @@ void loop(void)
             nextTransmit = nextTimePrint + txSec;
             STATE = RUN;
             Serial << millis() << F(" ***Init complete, NTP Time ");
-            printDateTime(now());
+            printDateTime(NTP.now());
         }
         break;
 
     case RUN:
-        utc = utcNow();
+        utc = NTP.now();
         if (utc != utcLast) {                 //once-per-second processing 
-
-            if ( utcM >= 55 || utcM <= 5 ) {
-                Serial << millis() << F(" utcLast: ");
-                printTime(utcLast);
-                Serial << F(" utc: ");
-                printTime(utc);
-                Serial << endl;
-            }
-            
             utcLast = utc;
             utcM = minute(utc);
             utcS = second(utc);
@@ -241,21 +212,6 @@ void loop(void)
         }
         break;
     }
-}
-
-ISR(INT2_vect)
-{
-    ++isrUTC;    //increment the time
-}
-
-time_t utcNow(void)
-{
-    time_t t;
-    
-    ATOMIC_BLOCK(ATOMIC_RESTORESTATE) {
-        t = isrUTC;
-    }
-    return t;
 }
 
 byte socketStat[MAX_SOCK_NUM];
