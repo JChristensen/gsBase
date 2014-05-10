@@ -1,7 +1,10 @@
 #include <utility/w5100.h>
+#include <util/atomic.h>
+#include <DS3232RTC.h>              //http://github.com/JChristensen/DS3232RTC
 #include <Ethernet.h>               //http://arduino.cc/en/Reference/Ethernet
 #include <MCP980X.h>
-#include <MCP79412RTC.h>            //http://github.com/JChristensen/MCP79412RTC
+//#include <MCP79412RTC.h>            //http://github.com/JChristensen/MCP79412RTC
+#include <LiquidTWI.h>              //http://forums.adafruit.com/viewtopic.php?f=19&t=21586&p=113177
 #include <MemoryFree.h>             //http://playground.arduino.cc/Code/AvailableMemory
 #include <movingAvg.h>              //http://github.com/JChristensen/movingAvg
 #include <NTP.h>
@@ -13,10 +16,11 @@
 #include "GroveStreams.h"
 
 //pin assignments
-const uint8_t WIZ_RESET = 9;            //WIZnet module reset pin
-const uint8_t HB_LED = A1;              //heartbeat LED
-const uint8_t NTP_LED = A2;             //ntp time sync
-const uint8_t WAIT_LED = A2;            //waiting for server response
+const uint8_t INT2_PIN = 2;             //RTC interrupt
+const uint8_t WIZ_RESET = 12;           //WIZnet module reset pin
+const uint8_t HB_LED = 13;              //heartbeat LED
+const uint8_t NTP_LED = 14;             //ntp time sync
+const uint8_t WAIT_LED = 15;            //waiting for server response
 
 //US Eastern Time Zone (New York, Detroit)
 TimeChangeRule myDST = { "EDT", Second, Sun, Mar, 2, -240};    //Daylight time = UTC - 4 hours
@@ -24,7 +28,9 @@ TimeChangeRule mySTD = { "EST", First, Sun, Nov, 2, -300};     //Standard time =
 Timezone myTZ(myDST, mySTD);
 
 EthernetClient client;
-int txSec = 10;            //transmit data once per minute, on this second
+int txSec = 10;                         //transmit data once per minute, on this second
+time_t utc, utcLast;
+volatile time_t isrUTC;                 //ISR's copy of UTC
 
 char gsServer[] = "grovestreams.com";
 char* PROGMEM gsOrgID = "66d58106-8c04-34d9-9e8c-17499a8942d7";
@@ -35,6 +41,7 @@ char* PROGMEM gsCompName = "Test-2";
 GroveStreams GS(gsServer, gsOrgID, gsApiKey, gsCompID, gsCompName, WAIT_LED);
 MCP980X mcp9802(0);
 movingAvg avgTemp; 
+LiquidTWI lcd(0); //i2c address 0 (0x20)
 
 //trap the MCUSR value after reset to determine the reset source
 //and ensure the watchdog is reset. this code does not work with a bootloader.
@@ -49,12 +56,15 @@ void wdt_init(void)
     wdt_disable();
 }
 
-time_t utc;                //current utc time
-
 void setup(void)
 {
+#if defined(MCP79412RTC_h)
     uint8_t rtcID[8];
+#else
+    uint8_t rtcID[8] = { 0xFF, 0xFF, 0x00, 0x1E, 0xC0, 0x98, 0x9C, 0x8D };
+#endif
 
+    pinMode(INT2_PIN, INPUT_PULLUP);
     pinMode(WIZ_RESET, OUTPUT);
     pinMode(HB_LED, OUTPUT);
     pinMode(NTP_LED, OUTPUT);
@@ -68,75 +78,139 @@ void setup(void)
     Serial << endl;
     delay(1);
     digitalWrite(WIZ_RESET, HIGH);
-    Serial << millis() << F(" WIZnet module reset") << endl;
-    if ( (utc = RTC.get()) > 0 ) {
-        setTime(utc);
-        RTC.calibWrite( (int8_t)RTC.eepromRead(127) );
-        RTC.idRead(rtcID);
-        Serial << endl << F("RTC ID = ");
-        for (int i=0; i<8; ++i) {
-            if (rtcID[i] < 16) Serial << '0';
-            Serial << _HEX(rtcID[i]);
-        }
-        Serial << endl;
-        Serial << F("UTC set from RTC: ");
-        printDateTime(utc);
-    }
-    else {
-        Serial << F("RTC FAIL!") << endl;
-    }        
-    delay(500);                   //allow some time for the ethernet chip to boot up
-    Ethernet.begin(rtcID + 2);    //DHCP
-    Serial << millis() << F(" Ethernet started, IP=") << Ethernet.localIP() << endl;
-    NTP.begin();
-    GS.begin();
     mcp9802.begin();
     mcp9802.writeConfig(ADC_RES_12BITS);
+    lcd.begin(16, 2);
+    TWBR = 12;
+    lcd.clear();
+    lcd.setBacklight(HIGH);
+
+    //set up RTC synchronization
+    lcd << F("RTC SYNC");
+    utcLast = RTC.get();                   //try to read the time from the RTC
+    if ( utcLast == 0 ) {                  //couldn't read it, something wrong
+        lcd << F(" FAIL");
+        digitalWrite( WAIT_LED, HIGH);
+        while (1);
+    }
+    RTC.set(utcLast);                      //start the rtc if not running
+    RTC.squareWave(SQWAVE_1_HZ);
+    EICRA = _BV(ISC21);                    //INT2 on falling edge
+    EIFR |= _BV(INTF2);                    //ensure interrupt flag is cleared
+    EIMSK |= _BV(INT2);                    //enable INT2
+
+    //wait for the first interrupt
+    utcLast = utcNow();
+    while (utcLast == utcNow()) delay(10);
+    utc = RTC.get();
+    ATOMIC_BLOCK(ATOMIC_RESTORESTATE) {
+        isrUTC = utc;
+    }
+    setTime(utc);
+#if defined(MCP79412RTC_h)
+    RTC.calibWrite( (int8_t)RTC.eepromRead(127) );
+    RTC.idRead(rtcID);
+#endif
+    lcd.clear();
+    lcd << F("MAC address:");
+    lcd.setCursor(0, 1);
+    for (int i=2; i<8; ++i) {
+        if (rtcID[i] < 16) lcd << '0';
+        lcd << _HEX( rtcID[i] );
+    }
+    Serial << F("UTC set from RTC: ");
+    printDateTime(utc);
+
+    delay(1000);                   //allow some time for the ethernet chip to boot up
+    Ethernet.begin(rtcID + 2);    //DHCP
+    Serial << millis() << F(" Ethernet started, IP=") << Ethernet.localIP() << endl;
+    lcd.clear();
+    lcd << F("Ethernet IP:");
+    lcd.setCursor(0, 1);
+    lcd << Ethernet.localIP();
+    delay(1000);
+    lcd.clear();
+    NTP.begin();
+    lcd << F("NTP Server IP:");
+    lcd.setCursor(0, 1);
+    lcd << NTP.serverIP;
+    delay(1000);
+    lcd.clear();
+    GS.begin();
+    lcd << F("GroveStreams IP:");
+    lcd.setCursor(0, 1);
+    lcd << NTP.serverIP;
+    delay(1000);
+    lcd.clear();
 }
 
 enum STATE_t { INIT, RUN } STATE;
 
 void loop(void)
 {
-    time_t utc;
     time_t local;
-    static time_t utcLast;
     static time_t nextTransmit;          //time for next data transmission
     static time_t nextTimePrint;         //next time to print the local time to serial
     char buf[96];
     static uint8_t socketsAvailable;
+    static int tF10;
+    static uint8_t utcS, utcM;
 
-    NTP.run();                           //run the NTP state machine
+    bool ntpSync = NTP.run();            //run the NTP state machine
+    if ( ntpSync ) {
+        utc = now();
+        ATOMIC_BLOCK(ATOMIC_RESTORESTATE) {    //sync time and RTC if NTP time was received
+            isrUTC = utc;
+        }
+        RTC.set(utc);
+        Serial << millis() << F(" ***NTP Time Sync ");
+        printDateTime(utc);
+    }
     digitalWrite(NTP_LED, NTP.syncStatus == STATUS_RECD);
 
     switch (STATE) {
 
     case INIT:
         //wait until we have a good time from the NTP server
-        if (NTP.lastSyncType == TYPE_PRECISE) {
+        if (ntpSync && NTP.lastSyncType == TYPE_PRECISE) {
             nextTimePrint = nextMinute();
             nextTransmit = nextTimePrint + txSec;
             STATE = RUN;
+            Serial << millis() << F(" ***Init complete, NTP Time ");
+            printDateTime(now());
         }
         break;
 
     case RUN:
-        utc = now();
+        utc = utcNow();
         if (utc != utcLast) {                 //once-per-second processing 
+
+            if ( utcM >= 55 || utcM <= 5 ) {
+                Serial << millis() << F(" utcLast: ");
+                printTime(utcLast);
+                Serial << F(" utc: ");
+                printTime(utc);
+                Serial << endl;
+            }
+            
             utcLast = utc;
+            utcM = minute(utc);
+            utcS = second(utc);
             local = myTZ.toLocal(utc);
             
-            int tF10 = mcp9802.readTempF10(AMBIENT);
             if ( second(utc) % 10 == 0 ) {    //read temperature every 10 sec
-                avgTemp.reading( tF10 );
+                tF10 = avgTemp.reading( mcp9802.readTempF10(AMBIENT) );
             }
+            digitalWrite(HB_LED, !(utcS & 1));
+            lcd.setCursor(0, 0);        //time & temp on first row
+            printTime(lcd, local);
+            lcd << tF10 / 10 << '.' << tF10 % 10 << '\xDF';
+            lcd.setCursor(0, 1);        //date on second row
+            printDayDate(lcd, local);
 
             if (utc >= nextTransmit) {        //time to send data?
                 nextTransmit += 60;
-                int t1 = avgTemp.getAvg();
-                int t2 = t1 % 10;
-                t1 /= 10;
-                sprintf(buf,"&1=%u&2=%lu&3=%lu&4=%lu&5=%u&6=%u&7=%u&8=%u&9=%i.%i&A=%u", GS.seq, GS.connTime, GS.respTime, GS.discTime, GS.success, GS.fail, GS.timeout, GS.freeMem, t1, t2, socketsAvailable);
+                sprintf(buf,"&1=%u&2=%lu&3=%lu&4=%lu&5=%u&6=%u&7=%u&8=%u&9=%i.%i&A=%u", GS.seq, GS.connTime, GS.respTime, GS.discTime, GS.success, GS.fail, GS.timeout, GS.freeMem, tF10/10, tF10%10, socketsAvailable);
                 if ( !GS.send(buf) ) {
                     Serial << F("Post FAIL");
                     ++GS.fail;
@@ -147,19 +221,41 @@ void loop(void)
                 }
                 ++GS.seq;
                 Serial << F(" seq=") << GS.seq << F(" connTime=") << GS.connTime << F(" respTime=") << GS.respTime << F(" discTime=") << GS.discTime << F(" success=") << GS.success;
-                Serial << F(" fail=") << GS.fail << F(" timeout=") << GS.timeout << F(" Sock=") << socketsAvailable << F(" freeMem=") << GS.freeMem << F(" tempF=") << t1 << '.' << t2 << endl;
+                Serial << F(" fail=") << GS.fail << F(" timeout=") << GS.timeout << F(" Sock=") << socketsAvailable << F(" freeMem=") << GS.freeMem << F(" tempF=") << tF10/10 << '.' << tF10%10 << endl;
             }
 
             if (utc >= nextTimePrint) {             //print time to Serial once per minute
                 Serial << endl << millis() << F(" Local: ");
                 printDateTime(local);
                 nextTimePrint += 60;
-                socketsAvailable = showSockStatus();
-                Serial << millis() << ' ' << socketsAvailable << F(" Sockets available") << endl;
+//                socketsAvailable = showSockStatus();
+//                Serial << millis() << ' ' << socketsAvailable << F(" Sockets available") << endl;
+                //renew the DHCP lease hourly
+                if (utcM == 0 && utcS == 0) {
+                    unsigned long msStart = millis();
+                    uint8_t mStat = Ethernet.maintain();
+                    unsigned long msEnd = millis();
+                    Serial << msEnd << ' ' << F("Ethernet.maintain=") << mStat << ' ' << msEnd - msStart << endl;
+                }
             }
         }
         break;
     }
+}
+
+ISR(INT2_vect)
+{
+    ++isrUTC;    //increment the time
+}
+
+time_t utcNow(void)
+{
+    time_t t;
+    
+    ATOMIC_BLOCK(ATOMIC_RESTORESTATE) {
+        t = isrUTC;
+    }
+    return t;
 }
 
 byte socketStat[MAX_SOCK_NUM];
@@ -211,3 +307,4 @@ uint8_t showSockStatus()
       }
     return nAvailable;
 }
+

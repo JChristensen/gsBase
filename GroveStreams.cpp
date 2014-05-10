@@ -13,9 +13,9 @@ GroveStreams::GroveStreams(char* serverName, char* PROGMEM orgID, char* PROGMEM 
 
 uint8_t GroveStreams::begin(void)
 {
-    int ret = dnsLookup(_serverName, gsServerIP);
+    int ret = dnsLookup(_serverName, serverIP);
     if (ret == 1) {
-        Serial << millis() << F(" GroveStreams IP=") << gsServerIP << endl;
+        Serial << millis() << F(" GroveStreams IP=") << serverIP << endl;
     }
     else {
         Serial << millis() << F(" GS DNS lookup fail, ret=") << ret << endl;
@@ -34,12 +34,12 @@ uint8_t GroveStreams::send(char* data)
     msConnect = millis();
     Serial << msConnect << F(" connecting") << endl;
     if (_ledPin >= 0) digitalWrite(_ledPin, HIGH);
-    if(client.connect(gsServerIP, serverPort)) {
+    if(client.connect(serverIP, serverPort)) {
         msConnected = millis();        
         Serial << msConnected << F(" connected") << endl;
         freeMem = freeMemory();
         client << F("PUT /api/feed?&compId=") << _compID << F("&compName=") << _compName << F("&org=") << _orgID << "&api_key=" << _apiKey;
-        client << data << F(" HTTP/1.1") << endl << F("Host: ") << gsServerIP << endl << F("Connection: close") << endl;
+        client << data << F(" HTTP/1.1") << endl << F("Host: ") << serverIP << endl << F("Connection: close") << endl;
         client << F("X-Forwarded-For: ") << Ethernet.localIP() << endl << F("Content-Type: application/json") << endl << endl;
         msPutComplete = millis();
         Serial << msPutComplete << F(" PUT complete ") << strlen(data) << endl;
@@ -67,7 +67,7 @@ uint8_t GroveStreams::send(char* data)
                     if (ch == '\r') {
                         haveStatus = true;
                         *b++ = 0;
-                        if (strncmp(data, httpOK, 15) == 0) Serial << millis() << F(" HTTP OK") << endl;
+                        if (strncmp(data, httpOK, 15) == 0) Serial << endl << endl << millis() << F(" HTTP OK") << endl;
                     }
                     else {
                         *b++ = ch;

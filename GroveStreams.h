@@ -19,7 +19,7 @@ class GroveStreams
         uint8_t begin(void);
         uint8_t send(char* data);
 
-        IPAddress gsServerIP;
+        IPAddress serverIP;
 
         //data to be posted
         unsigned int seq;                   //post sequence number
