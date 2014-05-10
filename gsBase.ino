@@ -143,9 +143,9 @@ void loop(void)
     char buf[96];
     static uint8_t socketsAvailable;
     static int tF10;
-    static uint8_t utcS, utcM;
 
     bool ntpSync = NTP.run();            //run the NTP state machine
+    if (ntpSync) {RTC.set(NTP.now());}
     digitalWrite(NTP_LED, NTP.syncStatus == STATUS_RECD);
 
     switch (STATE) {
@@ -155,6 +155,7 @@ void loop(void)
         if (ntpSync && NTP.lastSyncType == TYPE_PRECISE) {
             nextTimePrint = nextMinute();
             nextTransmit = nextTimePrint + txSec;
+            RTC.set(NTP.now());
             STATE = RUN;
             Serial << millis() << F(" ***Init complete, NTP Time ");
             printDateTime(NTP.now());
@@ -165,11 +166,11 @@ void loop(void)
         utc = NTP.now();
         if (utc != utcLast) {                 //once-per-second processing 
             utcLast = utc;
-            utcM = minute(utc);
-            utcS = second(utc);
+            uint8_t utcM = minute(utc);
+            uint8_t utcS = second(utc);
             local = myTZ.toLocal(utc);
             
-            if ( second(utc) % 10 == 0 ) {    //read temperature every 10 sec
+            if ( utcS % 10 == 0 ) {           //read temperature every 10 sec
                 tF10 = avgTemp.reading( mcp9802.readTempF10(AMBIENT) );
             }
             digitalWrite(HB_LED, !(utcS & 1));
