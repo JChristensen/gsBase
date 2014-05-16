@@ -92,7 +92,6 @@ void setup(void)
         digitalWrite( WAIT_LED, HIGH);
         while (1);
     }
-    RTC.set(utc);                          //start the rtc if not running
     RTC.squareWave(SQWAVE_1_HZ);
 #if defined(MCP79412RTC_h)
     RTC.calibWrite( (int8_t)RTC.eepromRead(127) );
@@ -118,9 +117,14 @@ void setup(void)
     lcd << F("NTP Server IP:");
     lcd.setCursor(0, 1);
     lcd << NTP.serverIP;
+
+    delay(1000);
+    lcd.clear();
+    utc = RTC.get();
+    while (utc == RTC.get()) delay(1);
     utc = RTC.get();
     NTP.setTime(utc);
-    Serial << millis() << F(" System time set from RTC: ") << endl;
+    Serial << millis() << F(" RTC set the system time: ");
     printDateTime(utc);
 
     delay(1000);
@@ -145,7 +149,14 @@ void loop(void)
     static int tF10;
 
     bool ntpSync = NTP.run();            //run the NTP state machine
-    if (ntpSync) {RTC.set(NTP.now());}
+    if (ntpSync) {
+        utc = NTP.now() + 1;    //add one since we will get an interrupt after turning the square wave back on
+        RTC.squareWave(SQWAVE_NONE);
+        RTC.set(utc);
+        RTC.squareWave(SQWAVE_1_HZ);
+        Serial << millis() << F(" NTP set the RTC: ");
+        printDateTime(utc);
+    }
     digitalWrite(NTP_LED, NTP.syncStatus == STATUS_RECD);
 
     switch (STATE) {
@@ -155,7 +166,6 @@ void loop(void)
         if (ntpSync && NTP.lastSyncType == TYPE_PRECISE) {
             nextTimePrint = nextMinute();
             nextTransmit = nextTimePrint + txSec;
-            RTC.set(NTP.now());
             STATE = RUN;
             Serial << millis() << F(" ***Init complete, NTP Time ");
             printDateTime(NTP.now());
@@ -166,6 +176,9 @@ void loop(void)
         utc = NTP.now();
         if (utc != utcLast) {                 //once-per-second processing 
             utcLast = utc;
+//            Serial << millis() << ' ';
+//            printTime(utc);
+//            Serial << endl;
             uint8_t utcM = minute(utc);
             uint8_t utcS = second(utc);
             local = myTZ.toLocal(utc);
@@ -180,6 +193,7 @@ void loop(void)
             lcd.setCursor(0, 1);        //date on second row
             printDayDate(lcd, local);
 
+//            if (false) {        //time to send data?
             if (utc >= nextTransmit) {        //time to send data?
                 nextTransmit += 60;
                 sprintf(buf,"&1=%u&2=%lu&3=%lu&4=%lu&5=%u&6=%u&7=%u&8=%u&9=%i.%i&A=%u", GS.seq, GS.connTime, GS.respTime, GS.discTime, GS.success, GS.fail, GS.timeout, GS.freeMem, tF10/10, tF10%10, socketsAvailable);
@@ -200,6 +214,7 @@ void loop(void)
                 Serial << endl << millis() << F(" Local: ");
                 printDateTime(local);
                 nextTimePrint += 60;
+//                NTP.schedSync(30);
 //                socketsAvailable = showSockStatus();
 //                Serial << millis() << ' ' << socketsAvailable << F(" Sockets available") << endl;
                 //renew the DHCP lease hourly
