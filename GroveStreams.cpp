@@ -24,42 +24,51 @@ uint8_t GroveStreams::begin(void)
     }
 }
 
+enum gsState_t { WAIT, RECV, DISC } GS_STATE;
+
 //to do: differentiate additional statuses
 //connect fail -- put fail (200 OK not recd) -- timeout -- ???
 //status 0 = ok, !0 = error
-uint8_t GroveStreams::send(char* data)
+int GroveStreams::send(char* data)
 {
-    const char httpOK[] = "HTTP/1.1 200 OK";
-    static char statusBuf[sizeof(httpOK)];
-    
-    msConnect = millis();
-//    Serial << msConnect << F(" connecting") << endl;
+    _msConnect = millis();
+    Serial << _msConnect << F(" connecting") << endl;
     if (_ledPin >= 0) digitalWrite(_ledPin, HIGH);
     if(client.connect(serverIP, serverPort)) {
-        msConnected = millis();        
-        Serial << msConnected << F(" connected") << endl;
+        _msConnected = millis();        
+        Serial << _msConnected << F(" connected") << endl;
         freeMem = freeMemory();
         client << F("PUT /api/feed?&compId=") << _compID << F("&compName=") << _compName << F("&org=") << _orgID << "&api_key=" << _apiKey;
         client << data << F(" HTTP/1.1") << endl << F("Host: ") << serverIP << endl << F("Connection: close") << endl;
         client << F("X-Forwarded-For: ") << Ethernet.localIP() << endl << F("Content-Type: application/json") << endl << endl;
-        msPutComplete = millis();
-        Serial << msPutComplete << F(" PUT complete ") << strlen(data) << endl;
-        connTime = msConnected - msConnect;
+        _msPutComplete = millis();
+        Serial << _msPutComplete << F(" PUT complete ") << strlen(data) << endl;
+        connTime = _msConnected - _msConnect;
+        return 0;
     } 
     else {
-        msConnected = millis();
-        connTime = msConnected - msConnect;
-        Serial << msConnected << F(" connect failed") << endl;
+        _msConnected = millis();
+        connTime = _msConnected - _msConnect;
+        Serial << _msConnected << F(" connect failed") << endl;
         if (_ledPin >= 0) digitalWrite(_ledPin, LOW);
-        return 0;
+        return -1;
     }
+}
+
+int GroveStreams::run(char* data) {
+    const char httpOK[] = "HTTP/1.1 200 OK";
+    static char statusBuf[sizeof(httpOK)];
+
+    switch (GS_STATE) {
+        
+    case RECV:
 
     boolean haveStatus = false;
-    msLastPacket = millis();    //initialize receive timeout
+    _msLastPacket = millis();    //initialize receive timeout
     while(client.connected()) {
         while(int nChar = client.available()) {
-            msLastPacket = millis();
-            Serial << msLastPacket << F(" received packet ") << nChar << endl;
+            _msLastPacket = millis();
+            Serial << _msLastPacket << F(" received packet, len=") << nChar << endl;
             char* b = statusBuf;
             for (int i = 0; i < nChar; i++) {
                 char ch = client.read();
@@ -78,24 +87,26 @@ uint8_t GroveStreams::send(char* data)
         }
 
         //if too much time has elapsed since the last packet, time out and close the connection from this end
-        if(millis() - msLastPacket >= RECEIVE_TIMEOUT) {
+        if(millis() - _msLastPacket >= RECEIVE_TIMEOUT) {
             ++timeout;
-            msLastPacket = millis();
-            Serial << endl << msLastPacket << F(" Timeout") << endl;
+            _msLastPacket = millis();
+            Serial << endl << _msLastPacket << F(" Timeout") << endl;
             client.stop();
             if (_ledPin >= 0) digitalWrite(_ledPin, LOW);
+            GS_STATE = DISC;
         }
     }
+    
 
     // close client end
-    msDisconnecting = millis();
-    Serial << msDisconnecting << F(" disconnecting") << endl;
+    _msDisconnecting = millis();
+    Serial << _msDisconnecting << F(" disconnecting") << endl;
     client.stop();
     if (_ledPin >= 0) digitalWrite(_ledPin, LOW);
-    msDisconnected = millis();
-    respTime = msLastPacket - msPutComplete;
-    discTime = msDisconnected - msDisconnecting;
-    Serial << msDisconnected << F(" disconnected") << endl;
+    _msDisconnected = millis();
+    respTime = _msLastPacket - _msPutComplete;
+    discTime = _msDisconnected - _msDisconnecting;
+    Serial << _msDisconnected << F(" disconnected") << endl;
     return 1;
 }
 

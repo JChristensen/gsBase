@@ -37,14 +37,14 @@ EthernetClient client;
 int txSec = 10;                         //transmit data once per minute, on this second
 time_t utc, utcLast;
 
+//GroveStreams
 char gsServer[] = "grovestreams.com";
 char* PROGMEM gsOrgID = "66d58106-8c04-34d9-9e8c-17499a8942d7";
 char* PROGMEM gsApiKey = "cbc8d222-6f25-3e26-9f6e-edfc3364d7fd";
-//char* PROGMEM gsCompID = "192.168.0.201";
 char* PROGMEM gsCompID = "Test-2";
 char* PROGMEM gsCompName = "Test-2";
-
 GroveStreams GS(gsServer, gsOrgID, gsApiKey, gsCompID, gsCompName, WAIT_LED);
+
 MCP980X mcp9802(0);
 movingAvg avgTemp; 
 LiquidTWI lcd(0); //i2c address 0 (0x20)

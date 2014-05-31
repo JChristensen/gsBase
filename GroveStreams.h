@@ -38,12 +38,12 @@ class GroveStreams
         char* PROGMEM _compID;        //component ID
         char* PROGMEM _compName;      //component name
  
-        unsigned long msConnect;
-        unsigned long msConnected;
-        unsigned long msPutComplete;
-        unsigned long msLastPacket;
-        unsigned long msDisconnecting;
-        unsigned long msDisconnected;
+        unsigned long _msConnect;
+        unsigned long _msConnected;
+        unsigned long _msPutComplete;
+        unsigned long _msLastPacket;
+        unsigned long _msDisconnecting;
+        unsigned long _msDisconnected;
         
         int _ledPin;
 
