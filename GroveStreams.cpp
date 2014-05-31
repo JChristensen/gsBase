@@ -29,10 +29,11 @@ uint8_t GroveStreams::begin(void)
 //status 0 = ok, !0 = error
 uint8_t GroveStreams::send(char* data)
 {
-    const char httpOK[16] = "HTTP/1.1 200 OK";
+    const char httpOK[] = "HTTP/1.1 200 OK";
+    static char statusBuf[sizeof(httpOK)];
     
     msConnect = millis();
-    Serial << msConnect << F(" connecting") << endl;
+//    Serial << msConnect << F(" connecting") << endl;
     if (_ledPin >= 0) digitalWrite(_ledPin, HIGH);
     if(client.connect(serverIP, serverPort)) {
         msConnected = millis();        
@@ -59,15 +60,15 @@ uint8_t GroveStreams::send(char* data)
         while(int nChar = client.available()) {
             msLastPacket = millis();
             Serial << msLastPacket << F(" received packet ") << nChar << endl;
-            char* b = data;    //use the caller's buffer
-            for (int i=0; i<nChar; i++) {
+            char* b = statusBuf;
+            for (int i = 0; i < nChar; i++) {
                 char ch = client.read();
                 Serial << _BYTE(ch);
-                if (!haveStatus) {
+                if ( !haveStatus && i < sizeof(statusBuf) ) {
                     if (ch == '\r') {
                         haveStatus = true;
                         *b++ = 0;
-                        if (strncmp(data, httpOK, 15) == 0) Serial << endl << endl << millis() << F(" HTTP OK") << endl;
+                        if (strncmp(statusBuf, httpOK, sizeof(httpOK)) == 0) Serial << endl << endl << millis() << F(" HTTP OK") << endl;
                     }
                     else {
                         *b++ = ch;
