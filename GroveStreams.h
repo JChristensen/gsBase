@@ -16,9 +16,10 @@ class GroveStreams
 {
     public:
         GroveStreams(char* serverName, char* PROGMEM orgID, char* PROGMEM apiKey, char* PROGMEM compID, char* PROGMEM compName, int ledPin = -1);
-        uint8_t begin(void);
-        uint8_t send(char* data);
-
+        void begin(void);
+        int send(char* data);
+        int run(void);
+        
         IPAddress serverIP;
 
         //data to be posted
@@ -32,12 +33,14 @@ class GroveStreams
         unsigned int freeMem;               //bytes of free SRAM
         
     private:
+        int _xmit(void);
         char* _serverName;
         char* PROGMEM _orgID;
         char* PROGMEM _apiKey;
         char* PROGMEM _compID;        //component ID
         char* PROGMEM _compName;      //component name
  
+        char* _data;
         unsigned long _msConnect;
         unsigned long _msConnected;
         unsigned long _msPutComplete;
