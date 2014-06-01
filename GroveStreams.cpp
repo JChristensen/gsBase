@@ -24,7 +24,7 @@ void GroveStreams::begin(void)
     }
 }
 
-enum gsState_t { GS_WAIT_SEND, GS_WAIT_RECV, GS_DISCONNECT } GS_STATE;
+enum gsState_t { GS_WAIT, GS_SEND, GS_RECV, GS_DISCONNECT } GS_STATE;
 
 //to do: differentiate additional statuses
 //connect fail -- put fail (200 OK not recd) -- timeout -- ???
@@ -32,69 +32,75 @@ enum gsState_t { GS_WAIT_SEND, GS_WAIT_RECV, GS_DISCONNECT } GS_STATE;
 
 //request data to be sent. returns 0 if accepted.
 //returns -1 if e.g. transmission already in progress, waiting response, etc.
-int GroveStreams::send(char* data) {
-    if (GS_STATE = GS_WAIT_SEND) {
+ethernetStatus_t GroveStreams::send(char* data)
+ {
+    if (GS_STATE == GS_WAIT) {
         _data = data;
         GS_STATE = GS_SEND;
-        return 0;
+        return SEND_ACCEPTED;
     }
     else {
-        return -1;
+        return SEND_BUSY;
     }
 }
 
-int GroveStreams::_xmit(void)
+ethernetStatus_t GroveStreams::_xmit(void)
 {
     _msConnect = millis();
     Serial << _msConnect << F(" connecting") << endl;
     if (_ledPin >= 0) digitalWrite(_ledPin, HIGH);
     if(client.connect(serverIP, serverPort)) {
-        _msConnected = millis();        
+        _msConnected = millis();
         Serial << _msConnected << F(" connected") << endl;
         freeMem = freeMemory();
         client << F("PUT /api/feed?&compId=") << _compID << F("&compName=") << _compName << F("&org=") << _orgID << "&api_key=" << _apiKey;
-        client << *_data << F(" HTTP/1.1") << endl << F("Host: ") << serverIP << endl << F("Connection: close") << endl;
+        client << _data << F(" HTTP/1.1") << endl << F("Host: ") << serverIP << endl << F("Connection: close") << endl;
         client << F("X-Forwarded-For: ") << Ethernet.localIP() << endl << F("Content-Type: application/json") << endl << endl;
         _msPutComplete = millis();
-        Serial << _msPutComplete << F(" PUT complete ") << strlen(data) << endl;
+        Serial << _msPutComplete << F(" PUT complete ") << strlen(_data) << endl;
         connTime = _msConnected - _msConnect;
-        return 0;
-    } 
+        return PUT_COMPLETE;
+    }
     else {
         _msConnected = millis();
         connTime = _msConnected - _msConnect;
         Serial << _msConnected << F(" connect failed") << endl;
         if (_ledPin >= 0) digitalWrite(_ledPin, LOW);
-        return -1;
+        return CONNECT_FAILED;
     }
 }
 
-int GroveStreams::run(void) {
+ethernetStatus_t GroveStreams::run(void)
+{
+    ethernetStatus_t ret = NO_STATUS;
     const char httpOKText[] = "HTTP/1.1 200 OK";
-    static char statusBuf[sizeof(httpOK)];
+    static char statusBuf[sizeof(httpOKText)];
 
     switch (GS_STATE) {
-        
-    case GS_WAIT_SEND:
+
+    case GS_WAIT:    //wait for next send
         break;
-        
-    case GS_SEND;
-        if ( _xmit() == 0 ) {
-            GS_STATE = GS_WAIT_RECV;
-            return 1;
+
+    case GS_SEND:
+        if ( _xmit() == PUT_COMPLETE ) {
+            GS_STATE = GS_RECV;
+            ret = PUT_COMPLETE;
         }
         else {
-            GS_STATE = GS_WAIT_SEND;
-            return -1;
+            GS_STATE = GS_WAIT;
+            ret = CONNECT_FAILED;
         }
         break;
-        
+
     case GS_RECV:
+        {
         boolean haveStatus = false;
         boolean httpOK = false;
+
         _msLastPacket = millis();    //initialize receive timeout
-        while(client.connected()) {
-            while(int nChar = client.available()) {
+        if(client.connected()) {
+            int nChar = client.available();
+            if (nChar > 0) {
                 _msLastPacket = millis();
                 Serial << _msLastPacket << F(" received packet, len=") << nChar << endl;
                 char* b = statusBuf;
@@ -107,9 +113,11 @@ int GroveStreams::run(void) {
                             *b++ = 0;
                             if (strncmp(statusBuf, httpOKText, sizeof(httpOKText)) == 0) {
                                 httpOK = true;
+                                ret = HTTP_OK;
                                 Serial << endl << endl << millis() << F(" HTTP OK") << endl;
                             }
                             else {
+                                ret = HTTP_OTHER;
                                 Serial << endl << endl << millis() << F(" HTTP STATUS: ") << statusBuf << endl;
                             }
                         }
@@ -119,33 +127,38 @@ int GroveStreams::run(void) {
                     }
                 }
             }
-    
             //if too much time has elapsed since the last packet, time out and close the connection from this end
-            if(millis() - _msLastPacket >= RECEIVE_TIMEOUT) {
+            else if (millis() - _msLastPacket >= RECEIVE_TIMEOUT) {
                 ++timeout;
                 _msLastPacket = millis();
                 Serial << endl << _msLastPacket << F(" Timeout") << endl;
                 client.stop();
                 if (_ledPin >= 0) digitalWrite(_ledPin, LOW);
-                GS_STATE = DISC;
+                GS_STATE = GS_DISCONNECT;
+                ret = TIMEOUT;
             }
         }
+        else {
+            GS_STATE = GS_DISCONNECT;
+            ret = DISCONNECTING;
+        }
         break;
-        
+    }
+
     case GS_DISCONNECT:
+        // close client end
+        _msDisconnecting = millis();
+        Serial << _msDisconnecting << F(" disconnecting") << endl;
+        client.stop();
+        if (_ledPin >= 0) digitalWrite(_ledPin, LOW);
+        _msDisconnected = millis();
+        respTime = _msLastPacket - _msPutComplete;
+        discTime = _msDisconnected - _msDisconnecting;
+        Serial << _msDisconnected << F(" disconnected") << endl;
+        GS_STATE = GS_WAIT;
+        ret = DISCONNECTED;
         break;
-
-    
-
-    // close client end
-    _msDisconnecting = millis();
-    Serial << _msDisconnecting << F(" disconnecting") << endl;
-    client.stop();
-    if (_ledPin >= 0) digitalWrite(_ledPin, LOW);
-    _msDisconnected = millis();
-    respTime = _msLastPacket - _msPutComplete;
-    discTime = _msDisconnected - _msDisconnecting;
-    Serial << _msDisconnected << F(" disconnected") << endl;
-    return 1;
+    }
+    return ret;
 }
 

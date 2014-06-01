@@ -46,7 +46,7 @@ char* PROGMEM gsCompName = "Test-2";
 GroveStreams GS(gsServer, gsOrgID, gsApiKey, gsCompID, gsCompName, WAIT_LED);
 
 MCP980X mcp9802(0);
-movingAvg avgTemp; 
+movingAvg avgTemp;
 LiquidTWI lcd(0); //i2c address 0 (0x20)
 Button btnMode(MODE_BUTTON, PULLUP, INVERT, DEBOUNCE_MS);
 
@@ -131,7 +131,7 @@ void setup(void)
     delay(1000);
 
     //start NTP, display server IP
-    NTP.begin();            
+    NTP.begin();
     lcd.clear();
     lcd << F("NTP Server IP:");
     lcd.setCursor(0, 1);
@@ -166,11 +166,13 @@ void loop(void)
     time_t local;
     static time_t nextTransmit;          //time for next data transmission
     static time_t nextTimePrint;         //next time to print the local time to serial
-    char buf[96];
+    static char buf[96];
     static uint8_t socketsAvailable;
     static int tF10;
 //    static uint16_t loopCount;
     static int rtcSet;
+
+    btnMode.read();
 
     bool ntpSync = NTP.run();            //run the NTP state machine
     if (ntpSync && NTP.lastSyncType == TYPE_PRECISE) {
@@ -183,8 +185,9 @@ void loop(void)
         ++rtcSet;
     }
     digitalWrite(NTP_LED, NTP.syncStatus == STATUS_RECD);
-    btnMode.read();
     
+    int gsStatus = GS.run();            //run the GroveStreams state machine
+
     switch (STATE) {
 
     case INIT:
@@ -207,7 +210,7 @@ void loop(void)
             Serial << millis() << F(" NTP Sync in 5 seconds") << endl;
         }
 
-        if (utc != utcLast) {                 //once-per-second processing 
+        if (utc != utcLast) {                 //once-per-second processing
             utcLast = utc;
 //            Serial << millis() << ' ';
 //            printTime(utc);
@@ -217,23 +220,22 @@ void loop(void)
             uint8_t utcS = second(utc);
             local = myTZ.toLocal(utc);
 
-//            if (false) {        //time to send data?
             if (utc >= nextTransmit) {        //time to send data?
                 nextTransmit += 60;
                 sprintf(buf,"&1=%u&2=%lu&3=%lu&4=%lu&5=%u&6=%u&7=%u&8=%u&9=%i.%i&A=%u", GS.seq, GS.connTime, GS.respTime, GS.discTime, GS.success, GS.fail, GS.timeout, GS.freeMem, tF10/10, tF10%10, rtcSet);
-                if ( !GS.send(buf) ) {
-                    Serial << F("Post FAIL");
-                    ++GS.fail;
-                }
-                else {
+                if ( GS.send(buf) == SEND_ACCEPTED ) {
                     Serial << F("Post OK");
                     ++GS.success;
+                }
+                else {
+                    Serial << F("Post FAIL");
+                    ++GS.fail;
                 }
                 ++GS.seq;
                 Serial << F(" seq=") << GS.seq << F(" connTime=") << GS.connTime << F(" respTime=") << GS.respTime << F(" discTime=") << GS.discTime << F(" success=") << GS.success;
                 Serial << F(" fail=") << GS.fail << F(" timeout=") << GS.timeout << F(" rtcSet=") << rtcSet << F(" freeMem=") << GS.freeMem << F(" tempF=") << tF10/10 << '.' << tF10%10 << endl;
             }
-            
+
             digitalWrite(HB_LED, !(utcS & 1));    //run the heartbeat LED
 
             if ( utcS % 10 == 0 ) {           //read temperature every 10 sec
@@ -291,7 +293,7 @@ byte socketStat[MAX_SOCK_NUM];
 uint8_t showSockStatus()
 {
     uint8_t nAvailable = 0;
-    
+
     for (int i = 0; i < MAX_SOCK_NUM; i++) {
         Serial.print(F("Socket#"));
         Serial.print(i);
