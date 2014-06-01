@@ -109,9 +109,9 @@ int GroveStreams::run(void) {
                                 httpOK = true;
                                 Serial << endl << endl << millis() << F(" HTTP OK") << endl;
                             }
-//test this else clause by setting httpOKText to something that won't compare!
                             else {
                                 Serial << endl << endl << millis() << F(" HTTP STATUS: ") << statusBuf << endl;
+                            }
                         }
                         else {
                             *b++ = ch;
