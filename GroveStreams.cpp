@@ -76,13 +76,14 @@ ethernetStatus_t GroveStreams::run(void)
     const char httpOKText[] = "HTTP/1.1 200 OK";
     static char statusBuf[sizeof(httpOKText)];
 
-    switch (GS_STATE) {
-
+    switch (GS_STATE)
+    {
     case GS_WAIT:    //wait for next send
         break;
 
     case GS_SEND:
         if ( _xmit() == PUT_COMPLETE ) {
+            _msLastPacket = millis();    //initialize receive timeout
             GS_STATE = GS_RECV;
             ret = PUT_COMPLETE;
         }
@@ -97,7 +98,6 @@ ethernetStatus_t GroveStreams::run(void)
         boolean haveStatus = false;
         boolean httpOK = false;
 
-        _msLastPacket = millis();    //initialize receive timeout
         if(client.connected()) {
             int nChar = client.available();
             if (nChar > 0) {

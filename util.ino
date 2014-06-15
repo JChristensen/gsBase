@@ -40,3 +40,19 @@ void printI00(Print& p, int val, char delim)
     return;
 }
 
+//get 6-byte MAC address from 24AA02E48 EEPROM (quick-and-dirty version)
+void getMAC(uint8_t* mac)
+{
+    const int EEPROM_ADDR = 0x50;
+    const uint8_t MAC_ADDR = 0xFA;
+
+    Wire.beginTransmission(EEPROM_ADDR);
+    Wire.write(MAC_ADDR);
+    Wire.endTransmission();
+    
+    Wire.requestFrom(EEPROM_ADDR, 6);
+    for (uint8_t i = 0; i < 6; i++) {
+        *(mac + i) = Wire.read();
+    }
+}
+

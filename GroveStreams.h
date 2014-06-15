@@ -1,3 +1,11 @@
+//to do
+//Count errors, meaning any of: SEND_BUSY, CONNECT_FAILED, TIMEOUT, HTTP_OTHER
+//Reset count when HTTP_OK occurs.  WDT reset if three consecutive errors.
+//Use WDT in main loop? (8 sec).
+//
+//Pullups on unused pins
+
+
 //GroveStreams Class
 #ifndef _GROVESTREAMS_H
 #define _GROVESTREAMS_H
@@ -10,20 +18,9 @@
 
 enum ethernetStatus_t { NO_STATUS, SEND_ACCEPTED, PUT_COMPLETE, DISCONNECTING, DISCONNECTED, HTTP_OK, SEND_BUSY, CONNECT_FAILED, TIMEOUT, HTTP_OTHER };
 
-//const int NO_STATUS = 0;
-//const int SEND_ACCEPTED = 1;
-//const int PUT_COMPLETE = 2;
-//const int DISCONNECTING = 3;
-//const int DISCONNECTED = 4;
-//const int HTTP_OK = 200;
-//const int SEND_BUSY = -1;
-//const int CONNECT_FAILED = -2;
-//const int TIMEOUT = -3;
-//const int HTTP_OTHER = -4;
-
 const int serverPort = 80;
 extern EthernetClient client;
-const unsigned long RECEIVE_TIMEOUT = 10000;    //wait 10 sec for packet to be received from server
+const unsigned long RECEIVE_TIMEOUT = 10000;    //ms to wait for response from server
 
 class GroveStreams
 {
@@ -50,8 +47,8 @@ class GroveStreams
         char* _serverName;
         char* PROGMEM _orgID;
         char* PROGMEM _apiKey;
-        char* PROGMEM _compID;        //component ID
-        char* PROGMEM _compName;      //component name
+        char* PROGMEM _compID;              //component ID
+        char* PROGMEM _compName;            //component name
 
         char* _data;
         unsigned long _msConnect;

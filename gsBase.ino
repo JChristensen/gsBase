@@ -12,7 +12,7 @@
 #include <SPI.h>                    //http://arduino.cc/en/Reference/SPI
 #include <Streaming.h>              //http://arduiniana.org/libraries/streaming/
 #include <Time.h>                   //http://www.arduino.cc/playground/Code/Time
-#include <Timezone.h>               //https://github.com/JChristensen/Timezone
+#include <Timezone.h>               //http://github.com/JChristensen/Timezone
 #include <Wire.h>                   //http://arduino.cc/en/Reference/Wire
 #include "GroveStreams.h"
 
@@ -65,11 +65,6 @@ void wdt_init(void)
 
 void setup(void)
 {
-#if defined(MCP79412RTC_h)
-    uint8_t rtcID[8];
-#else
-    uint8_t rtcID[8] = { 0xFF, 0xFF, 0x00, 0x1E, 0xC0, 0x98, 0x9C, 0x8D };
-#endif
 
     //pin inits
     pinMode(INT2_PIN, INPUT_PULLUP);
@@ -108,21 +103,22 @@ void setup(void)
     RTC.squareWave(SQWAVE_1_HZ);           //1Hz interrupts for timekeeping
 #if defined(MCP79412RTC_h)
     RTC.calibWrite( (int8_t)RTC.eepromRead(127) );    //ensure calibration
-    RTC.idRead(rtcID);                     //get the RTC ID/MAC address
 #endif
 
-    //display MAC address
+    //get MAC address & display
+    uint8_t mac[6];
     lcd.clear();
     lcd << F("MAC address:");
     lcd.setCursor(0, 1);
-    for (int i=2; i<8; ++i) {
-        if (rtcID[i] < 16) lcd << '0';
-        lcd << _HEX( rtcID[i] );
+    getMAC(mac);
+    for (int i=0; i<6; ++i) {
+        if (mac[i] < 16) lcd << '0';
+        lcd << _HEX( mac[i] );
     }
     delay(1000);                           //allow some time for the ethernet chip to boot up
 
     //start Ethernet, display IP
-    Ethernet.begin(rtcID + 2);             //DHCP
+    Ethernet.begin(mac);                   //DHCP
     Serial << millis() << F(" Ethernet started, IP=") << Ethernet.localIP() << endl;
     lcd.clear();
     lcd << F("Ethernet IP:");
@@ -172,6 +168,7 @@ void loop(void)
 //    static uint16_t loopCount;
     static int rtcSet;
 
+    wdt_reset();
     btnMode.read();
 
     bool ntpSync = NTP.run();            //run the NTP state machine
@@ -197,6 +194,15 @@ void loop(void)
             nextTransmit = nextTimePrint + txSec;
             STATE = RUN;
             Serial << millis() << F(" Init complete, begin Run state") << endl;
+            wdt_enable(WDTO_8S);
+            strcpy(buf, "&msg=MCU%20reset%200x");
+            if (mcusr < 16) strcat(buf, "0");
+            itoa(mcusr, buf + strlen(buf), 16);
+            if (mcusr & _BV(WDRF))  strcat(buf, "%20WDRF");
+            if (mcusr & _BV(BORF))  strcat(buf, "%20BORF");
+            if (mcusr & _BV(EXTRF)) strcat(buf, "%20EXTRF");
+            if (mcusr & _BV(PORF))  strcat(buf, "%20PORF");
+            GS.send(buf);
         }
         break;
 
@@ -222,7 +228,7 @@ void loop(void)
 
             if (utc >= nextTransmit) {        //time to send data?
                 nextTransmit += 60;
-                sprintf(buf,"&1=%u&2=%lu&3=%lu&4=%lu&5=%u&6=%u&7=%u&8=%u&9=%i.%i&A=%u", GS.seq, GS.connTime, GS.respTime, GS.discTime, GS.success, GS.fail, GS.timeout, GS.freeMem, tF10/10, tF10%10, rtcSet);
+                sprintf(buf,"&a=%u&b=%lu&c=%lu&d=%lu&e=%u&f=%u&g=%u&h=%u&i=%i.%i&j=%u", GS.seq, GS.connTime, GS.respTime, GS.discTime, GS.success, GS.fail, GS.timeout, GS.freeMem, tF10/10, tF10%10, rtcSet);
                 if ( GS.send(buf) == SEND_ACCEPTED ) {
                     Serial << F("Post OK");
                     ++GS.success;
@@ -232,8 +238,8 @@ void loop(void)
                     ++GS.fail;
                 }
                 ++GS.seq;
-                Serial << F(" seq=") << GS.seq << F(" connTime=") << GS.connTime << F(" respTime=") << GS.respTime << F(" discTime=") << GS.discTime << F(" success=") << GS.success;
-                Serial << F(" fail=") << GS.fail << F(" timeout=") << GS.timeout << F(" rtcSet=") << rtcSet << F(" freeMem=") << GS.freeMem << F(" tempF=") << tF10/10 << '.' << tF10%10 << endl;
+                Serial << F(" seq=") << GS.seq << F(" cnct=") << GS.connTime << F(" resp=") << GS.respTime << F(" disc=") << GS.discTime << F(" success=") << GS.success;
+                Serial << F(" fail=") << GS.fail << F(" timeout=") << GS.timeout << F(" rtcSet=") << rtcSet << F(" mem=") << GS.freeMem << F(" tempF=") << tF10/10 << '.' << tF10%10 << endl;
             }
 
             digitalWrite(HB_LED, !(utcS & 1));    //run the heartbeat LED
