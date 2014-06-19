@@ -29,6 +29,7 @@ enum gsState_t { GS_WAIT, GS_SEND, GS_RECV, GS_DISCONNECT } GS_STATE;
 //to do: differentiate additional statuses
 //connect fail -- put fail (200 OK not recd) -- timeout -- ???
 //status 0 = ok, !0 = error
+//count errors, reset MCU after n consecutive errors
 
 //request data to be sent. returns 0 if accepted.
 //returns -1 if e.g. transmission already in progress, waiting response, etc.

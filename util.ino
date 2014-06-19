@@ -40,6 +40,13 @@ void printI00(Print& p, int val, char delim)
     return;
 }
 
+void timeStamp(Print& p, time_t t)
+{
+    printTime(p, t);
+    printI00(p, day(t), 0);
+    Serial << monthShortStr(month(t)) << year(t) << ' ';
+}
+
 //get 6-byte MAC address from 24AA02E48 EEPROM (quick-and-dirty version)
 void getMAC(uint8_t* mac)
 {

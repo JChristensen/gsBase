@@ -1,10 +1,10 @@
 #include <utility/w5100.h>
-#include <util/atomic.h>
+//#include <util/atomic.h>
 #include <Button.h>                 //http://github.com/JChristensen/Button
 #include <DS3232RTC.h>              //http://github.com/JChristensen/DS3232RTC
+#include <avr/eeprom.h>
 #include <Ethernet.h>               //http://arduino.cc/en/Reference/Ethernet
 #include <MCP980X.h>
-//#include <MCP79412RTC.h>            //http://github.com/JChristensen/MCP79412RTC
 #include <LiquidTWI.h>              //http://forums.adafruit.com/viewtopic.php?f=19&t=21586&p=113177
 #include <MemoryFree.h>             //http://playground.arduino.cc/Code/AvailableMemory
 #include <movingAvg.h>              //http://github.com/JChristensen/movingAvg
@@ -15,6 +15,7 @@
 #include <Timezone.h>               //http://github.com/JChristensen/Timezone
 #include <Wire.h>                   //http://arduino.cc/en/Reference/Wire
 #include "GroveStreams.h"
+#include "classes.h"
 
 //pin assignments
 const uint8_t INT2_PIN = 2;             //RTC interrupt
@@ -23,15 +24,47 @@ const uint8_t HB_LED = 13;              //heartbeat LED
 const uint8_t NTP_LED = 14;             //ntp time sync
 const uint8_t WAIT_LED = 15;            //waiting for server response
 const uint8_t MODE_BUTTON = 20;
+const uint8_t GM_POWER = 22;            //geiger power enable pin
+const uint8_t GM_PULSE_LED = 21;        //the LED to blink
+const uint8_t GM_INPUT = 10;            //INT0
+
+uint8_t gmIntervalIdx;                      //index to geiger sample interval array
+EEMEM uint8_t ee_gmIntervalIdx;             //copy persisted in EEPROM
+const uint8_t gmIntervalIdx_DEFAULT = 2;    //index to the default value (i.e. 2 -> 10 min)
+const int gmIntervals[] = { 1, 5, 10, 15, 20, 30, 60 };
+
+const unsigned long PULSE_DUR = 50;         //blink duration for the LED, ms
+oneShotLED countLED;
 
 const bool PULLUP = true;
 const bool INVERT = true;
 const unsigned long DEBOUNCE_MS = 25;
 
 //US Eastern Time Zone (New York, Detroit)
-TimeChangeRule myDST = { "EDT", Second, Sun, Mar, 2, -240 };    //Daylight time = UTC - 4 hours
-TimeChangeRule mySTD = { "EST", First, Sun, Nov, 2, -300 };     //Standard time = UTC - 5 hours
-Timezone myTZ(myDST, mySTD);
+//TimeChangeRule myDST = { "EDT", Second, Sun, Mar, 2, -240 };    //Daylight time = UTC - 4 hours
+//TimeChangeRule mySTD = { "EST", First, Sun, Nov, 2, -300 };     //Standard time = UTC - 5 hours
+//Timezone myTZ(myDST, mySTD);
+
+//Continental US Time Zones
+TimeChangeRule EDT = {"EDT", Second, Sun, Mar, 2, -240};    //Daylight time = UTC - 4 hours
+TimeChangeRule EST = {"EST", First, Sun, Nov, 2, -300};     //Standard time = UTC - 5 hours
+Timezone Eastern(EDT, EST);
+TimeChangeRule CDT = {"CDT", Second, Sun, Mar, 2, -300};    //Daylight time = UTC - 5 hours
+TimeChangeRule CST = {"CST", First, Sun, Nov, 2, -360};     //Standard time = UTC - 6 hours
+Timezone Central(CDT, CST);
+TimeChangeRule MDT = {"MDT", Second, Sun, Mar, 2, -360};    //Daylight time = UTC - 6 hours
+TimeChangeRule MST = {"MST", First, Sun, Nov, 2, -420};     //Standard time = UTC - 7 hours
+Timezone Mountain(MDT, MST);
+TimeChangeRule PDT = {"PDT", Second, Sun, Mar, 2, -420};    //Daylight time = UTC - 7 hours
+TimeChangeRule PST = {"PST", First, Sun, Nov, 2, -480};     //Standard time = UTC - 8 hours
+Timezone Pacific(PDT, PST);
+TimeChangeRule utcRule = {"UTC", First, Sun, Nov, 2, 0};    //No change for UTC
+Timezone UTC(utcRule, utcRule);
+Timezone *timezones[] = { &UTC, &Eastern, &Central, &Mountain, &Pacific };
+Timezone *tz;               //pointer to the time zone
+uint8_t tzIndex;            //index to the timezones[] array
+EEMEM uint8_t ee_tzIndex;   //copy persisted in EEPROM
+char *tzNames[] = { "UTC  ", "Eastern", "Central", "Mountain", "Pacific" };
 
 EthernetClient client;
 int txSec = 10;                         //transmit data once per minute, on this second
@@ -65,14 +98,14 @@ void wdt_init(void)
 
 void setup(void)
 {
-
     //pin inits
     pinMode(INT2_PIN, INPUT_PULLUP);
     pinMode(WIZ_RESET, OUTPUT);
     pinMode(HB_LED, OUTPUT);
     pinMode(NTP_LED, OUTPUT);
     pinMode(WAIT_LED, OUTPUT);
-
+    pinMode(GM_INPUT, INPUT_PULLUP);
+    
     //report the reset source
     Serial.begin(115200);
     Serial << endl << millis() << F(" MCU reset 0x0") << _HEX(mcusr);
@@ -81,6 +114,21 @@ void setup(void)
     if (mcusr & _BV(EXTRF)) Serial << F(" EXTRF");
     if (mcusr & _BV(PORF))  Serial << F(" PORF");
     Serial << endl;
+
+    //get geiger interval from eeprom and ensure that it's valid
+    gmIntervalIdx = eeprom_read_byte( &ee_gmIntervalIdx );
+    if ( gmIntervalIdx >= sizeof(gmIntervals) / sizeof(gmIntervals[0]) ) {
+        gmIntervalIdx = gmIntervalIdx_DEFAULT;
+        eeprom_write_byte( &ee_gmIntervalIdx, gmIntervalIdx);
+    }
+    
+    //same for the time zone index
+    tzIndex = eeprom_read_byte( &ee_tzIndex );
+    if ( tzIndex >= sizeof(tzNames)/sizeof(tzNames[0]) ) {
+        tzIndex = 0;
+        eeprom_write_byte( &ee_tzIndex, tzIndex);
+    }
+    tz = timezones[tzIndex];                //set the tz
 
     //device inits
     delay(1);
@@ -101,9 +149,6 @@ void setup(void)
         while (1);
     }
     RTC.squareWave(SQWAVE_1_HZ);           //1Hz interrupts for timekeeping
-#if defined(MCP79412RTC_h)
-    RTC.calibWrite( (int8_t)RTC.eepromRead(127) );    //ensure calibration
-#endif
 
     //get MAC address & display
     uint8_t mac[6];
@@ -153,6 +198,9 @@ void setup(void)
     NTP.setTime(utc);
     Serial << millis() << F(" RTC set the system time: ");
     printDateTime(utc);
+
+    countLED.begin(GM_PULSE_LED, PULSE_DUR);
+    GEIGER.begin(gmIntervals[gmIntervalIdx], GM_POWER, utc);
 }
 
 enum STATE_t { INIT, RUN } STATE;
@@ -167,9 +215,21 @@ void loop(void)
     static int tF10;
 //    static uint16_t loopCount;
     static int rtcSet;
+    static int cpm;
+    static bool haveCPM = false;
 
     wdt_reset();
     btnMode.read();
+    countLED.run();
+
+    //check for data from the gc
+    if (GEIGER.run(&cpm, utc)) {
+        haveCPM = true;
+        timeStamp(Serial, utc);
+        Serial << cpm << F(" COUNTS/MIN") << endl;
+    }
+
+    if ( GEIGER.pulse() ) countLED.on();    //blip the LED
 
     bool ntpSync = NTP.run();            //run the NTP state machine
     if (ntpSync && NTP.lastSyncType == TYPE_PRECISE) {
@@ -224,11 +284,18 @@ void loop(void)
 //            loopCount = 0;
             uint8_t utcM = minute(utc);
             uint8_t utcS = second(utc);
-            local = myTZ.toLocal(utc);
+            local = (*tz).toLocal(utc);
 
             if (utc >= nextTransmit) {        //time to send data?
                 nextTransmit += 60;
                 sprintf(buf,"&a=%u&b=%lu&c=%lu&d=%lu&e=%u&f=%u&g=%u&h=%u&i=%i.%i&j=%u", GS.seq, GS.connTime, GS.respTime, GS.discTime, GS.success, GS.fail, GS.timeout, GS.freeMem, tF10/10, tF10%10, rtcSet);
+                if (haveCPM) {                //have a reading from the gm counter, add it on
+                    char aBuf[8];
+                    itoa(cpm, aBuf, 10);
+                    strcat(buf, "&k=");
+                    strcat(buf, aBuf);
+                    haveCPM = false;
+                }
                 if ( GS.send(buf) == SEND_ACCEPTED ) {
                     Serial << F("Post OK");
                     ++GS.success;
@@ -247,20 +314,13 @@ void loop(void)
             if ( utcS % 10 == 0 ) {           //read temperature every 10 sec
                 tF10 = avgTemp.reading( mcp9802.readTempF10(AMBIENT) );
             }
-
-            lcd.setCursor(0, 0);        //lcd display, time & temp on first row
-            printTime(lcd, local);
-            lcd << tF10 / 10 << '.' << tF10 % 10 << '\xDF';
-            lcd.setCursor(0, 1);        //date on second row
-            printDayDate(lcd, local);
+            
+            runDisplay(local, tF10, cpm);
 
             if (utc >= nextTimePrint) {             //print time to Serial once per minute
                 Serial << endl << millis() << F(" Local: ");
                 printDateTime(local);
                 nextTimePrint += 60;
-//                NTP.schedSync(30);
-//                socketsAvailable = showSockStatus();
-//                Serial << millis() << ' ' << socketsAvailable << F(" Sockets available") << endl;
                 //renew the DHCP lease hourly
                 if (utcM == 0 && utcS == 0) {
                     unsigned long msStart = millis();
@@ -272,6 +332,29 @@ void loop(void)
         }
         break;
     }
+}
+
+void runDisplay(time_t t, int tF10, int cpm)
+{
+    static uint8_t dispMode;
+    char lcdBuf[18];
+    const char spaces[8] = "      ";
+    const char cpmText[] = " counts/min";
+    
+    lcd.setCursor(0, 0);        //lcd display, time & temp on first row
+    printTime(lcd, t);
+    lcd << tF10 / 10 << '.' << tF10 % 10 << '\xDF';
+    lcd.setCursor(0, 1);        //move to second row
+    if (dispMode >= 2) {
+        printDayDate(lcd, t);
+    }
+    else {
+        itoa (cpm, lcdBuf, 10);
+        strcat(lcdBuf, cpmText);
+        strncat( lcdBuf, spaces, 16 - strlen(lcdBuf) );
+        lcd << lcdBuf;
+    }
+    if (++dispMode >= 4) dispMode = 0;
 }
 
 byte socketStat[MAX_SOCK_NUM];
