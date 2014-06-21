@@ -22,6 +22,7 @@ class geiger
         bool run(int* count, time_t utc);
         bool pulse(void);
         int count(void);
+        void setInterval(int sampleInterval);
 
     private:
         int _sampleInterval;
@@ -29,6 +30,8 @@ class geiger
         bool _continuous;            //sample continuously
         uint8_t _powerPin;
 };
+
+enum gmStates_t { gmINIT, gmWAIT, gmWARMUP, gmCOLLECT, gmCONTINUOUS } gmState;
 
 //sample interval in minutes, current utc
 void geiger::begin(int sampleInterval, uint8_t powerPin, time_t utc)
@@ -42,12 +45,17 @@ void geiger::begin(int sampleInterval, uint8_t powerPin, time_t utc)
     _powerPin = powerPin;
     digitalWrite(_powerPin, LOW);
     pinMode(_powerPin, OUTPUT);
+    setInterval(sampleInterval);
+}
+
+void geiger::setInterval(int sampleInterval)
+{
     if (sampleInterval < 1 || sampleInterval > 60) sampleInterval = 10;
     _sampleInterval = 60 * sampleInterval;                              //convert to seconds
     _continuous = (_sampleInterval == 60);
+    gmState = gmINIT;
+    Serial << F("G-M interval = ") << _sampleInterval << endl;
 }
-
-enum gmStates_t { gmINIT, gmWAIT, gmWARMUP, gmCOLLECT, gmCONTINUOUS } gmState;
 
 //populate the user count if a minute has elapsed
 bool geiger::run(int* count, time_t utc)
@@ -55,28 +63,31 @@ bool geiger::run(int* count, time_t utc)
     bool ret = false;
 
     switch (gmState) {
-        case gmINIT:
+    case gmINIT:
         gmState = gmWAIT;
-        timeStamp(Serial, utc);
-        Serial << F("GM wait") << endl;
+        digitalWrite(_powerPin, LOW);   //if interval is changed while collect is in progress, it gets aborted, so ensure the power is turned off here
         _nextSampleTime = utc + _sampleInterval - utc % _sampleInterval;    //next "neat" time
         if (_nextSampleTime - utc < WARMUP_TIME) _nextSampleTime += _sampleInterval;    //make sure not too soon
+        timeStamp(Serial, utc);
+        Serial << F("G-M wait, next sample: ");
+        timeStamp(Serial, _nextSampleTime);
+        Serial << endl;
         break;
 
-        case gmWAIT:
+    case gmWAIT:
         if (utc >= _nextSampleTime - WARMUP_TIME) {
             gmState = gmWARMUP;
             digitalWrite(_powerPin, HIGH);
             timeStamp(Serial, utc);
-            Serial << F("GM warmup, power on") << endl;
+            Serial << F("G-M warmup, power on") << endl;
         }
         break;
 
-        case gmWARMUP:
+    case gmWARMUP:
         if (utc >= _nextSampleTime) {
             gmState = _continuous ? gmCONTINUOUS : gmCOLLECT;
             timeStamp(Serial, utc);
-            Serial << F("GM collect") << endl;
+            Serial << F("G-M collect") << endl;
             ATOMIC_BLOCK(ATOMIC_RESTORESTATE) {
                 _count = 0;
                 _pulse = false;
@@ -86,7 +97,7 @@ bool geiger::run(int* count, time_t utc)
         }
         break;
 
-        case gmCOLLECT:
+    case gmCOLLECT:
         if (utc >= _nextSampleTime + 60) {
             EIMSK &= ~_BV(INT0);                 //disable the interrupt
             ATOMIC_BLOCK(ATOMIC_RESTORESTATE) {
@@ -96,14 +107,17 @@ bool geiger::run(int* count, time_t utc)
             }
             _nextSampleTime += _sampleInterval;
             timeStamp(Serial, utc);
-            Serial << F("GM wait") << endl;
+//            Serial << F("G-M wait") << endl;
+            Serial << F("G-M wait, next sample: ");
+            timeStamp(Serial, _nextSampleTime);
+            Serial << endl;
             gmState = gmWAIT;
             digitalWrite(_powerPin, LOW);
             ret = true;
         }
         break;
 
-        case gmCONTINUOUS:
+    case gmCONTINUOUS:
         if (utc >= _nextSampleTime + 60) {
             ATOMIC_BLOCK(ATOMIC_RESTORESTATE) {
                 *count = _count;
@@ -111,6 +125,10 @@ bool geiger::run(int* count, time_t utc)
                 _pulse = false;
             }
             _nextSampleTime += _sampleInterval;
+            timeStamp(Serial, utc);
+            Serial << F("G-M continuous, next sample: ");
+            timeStamp(Serial, _nextSampleTime);
+            Serial << endl;
             ret = true;
         }
         break;
@@ -161,4 +179,5 @@ void oneShotLED::on(void)
     _msOn = millis();
     digitalWrite(_pin, HIGH);
 }
+
 

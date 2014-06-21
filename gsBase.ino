@@ -1,3 +1,5 @@
+//Check fuses: H:FD, E:D6, L:FF (preserve EEPROM thru chip erase)
+
 #include <utility/w5100.h>
 //#include <util/atomic.h>
 #include <Button.h>                 //http://github.com/JChristensen/Button
@@ -19,14 +21,16 @@
 
 //pin assignments
 const uint8_t INT2_PIN = 2;             //RTC interrupt
+const uint8_t GM_INPUT = 10;            //INT0
 const uint8_t WIZ_RESET = 12;           //WIZnet module reset pin
 const uint8_t HB_LED = 13;              //heartbeat LED
 const uint8_t NTP_LED = 14;             //ntp time sync
 const uint8_t WAIT_LED = 15;            //waiting for server response
-const uint8_t MODE_BUTTON = 20;
+const uint8_t GM_PULSE_LED = 18;        //the LED to blink
+const uint8_t SET_BUTTON = 19;
+const uint8_t UP_BUTTON = 20;
+const uint8_t DN_BUTTON = 21;
 const uint8_t GM_POWER = 22;            //geiger power enable pin
-const uint8_t GM_PULSE_LED = 21;        //the LED to blink
-const uint8_t GM_INPUT = 10;            //INT0
 
 uint8_t gmIntervalIdx;                      //index to geiger sample interval array
 EEMEM uint8_t ee_gmIntervalIdx;             //copy persisted in EEPROM
@@ -40,35 +44,39 @@ const bool PULLUP = true;
 const bool INVERT = true;
 const unsigned long DEBOUNCE_MS = 25;
 
+const uint8_t maxNtpTimeouts = 3;
+ntpClass NTP(maxNtpTimeouts, NTP_LED);
+
 //US Eastern Time Zone (New York, Detroit)
 //TimeChangeRule myDST = { "EDT", Second, Sun, Mar, 2, -240 };    //Daylight time = UTC - 4 hours
 //TimeChangeRule mySTD = { "EST", First, Sun, Nov, 2, -300 };     //Standard time = UTC - 5 hours
 //Timezone myTZ(myDST, mySTD);
 
 //Continental US Time Zones
-TimeChangeRule EDT = {"EDT", Second, Sun, Mar, 2, -240};    //Daylight time = UTC - 4 hours
-TimeChangeRule EST = {"EST", First, Sun, Nov, 2, -300};     //Standard time = UTC - 5 hours
+TimeChangeRule EDT = { "EDT", Second, Sun, Mar, 2, -240 };    //Daylight time = UTC - 4 hours
+TimeChangeRule EST = { "EST", First, Sun, Nov, 2, -300 };     //Standard time = UTC - 5 hours
 Timezone Eastern(EDT, EST);
-TimeChangeRule CDT = {"CDT", Second, Sun, Mar, 2, -300};    //Daylight time = UTC - 5 hours
-TimeChangeRule CST = {"CST", First, Sun, Nov, 2, -360};     //Standard time = UTC - 6 hours
+TimeChangeRule CDT = { "CDT", Second, Sun, Mar, 2, -300 };    //Daylight time = UTC - 5 hours
+TimeChangeRule CST = { "CST", First, Sun, Nov, 2, -360 };     //Standard time = UTC - 6 hours
 Timezone Central(CDT, CST);
-TimeChangeRule MDT = {"MDT", Second, Sun, Mar, 2, -360};    //Daylight time = UTC - 6 hours
-TimeChangeRule MST = {"MST", First, Sun, Nov, 2, -420};     //Standard time = UTC - 7 hours
+TimeChangeRule MDT = { "MDT", Second, Sun, Mar, 2, -360 };    //Daylight time = UTC - 6 hours
+TimeChangeRule MST = { "MST", First, Sun, Nov, 2, -420 };     //Standard time = UTC - 7 hours
 Timezone Mountain(MDT, MST);
-TimeChangeRule PDT = {"PDT", Second, Sun, Mar, 2, -420};    //Daylight time = UTC - 7 hours
-TimeChangeRule PST = {"PST", First, Sun, Nov, 2, -480};     //Standard time = UTC - 8 hours
+TimeChangeRule PDT = { "PDT", Second, Sun, Mar, 2, -420 };    //Daylight time = UTC - 7 hours
+TimeChangeRule PST = { "PST", First, Sun, Nov, 2, -480 };     //Standard time = UTC - 8 hours
 Timezone Pacific(PDT, PST);
-TimeChangeRule utcRule = {"UTC", First, Sun, Nov, 2, 0};    //No change for UTC
+TimeChangeRule utcRule = { "UTC", First, Sun, Nov, 2, 0 };    //No change for UTC
 Timezone UTC(utcRule, utcRule);
 Timezone *timezones[] = { &UTC, &Eastern, &Central, &Mountain, &Pacific };
 Timezone *tz;               //pointer to the time zone
-uint8_t tzIndex;            //index to the timezones[] array
+uint8_t tzIndex;            //index to the timezones[] array and the tzNames[] array
 EEMEM uint8_t ee_tzIndex;   //copy persisted in EEPROM
-char *tzNames[] = { "UTC  ", "Eastern", "Central", "Mountain", "Pacific" };
+char *tzNames[] = { "UTC     ", "Eastern ", "Central ", "Mountain", "Pacific " };
+TimeChangeRule *tcr;        //pointer to the time change rule, use to get TZ abbrev
 
 EthernetClient client;
 int txSec = 10;                         //transmit data once per minute, on this second
-time_t utc, utcLast;
+time_t utc, local;
 
 //GroveStreams
 char gsServer[] = "grovestreams.com";
@@ -81,7 +89,9 @@ GroveStreams GS(gsServer, gsOrgID, gsApiKey, gsCompID, gsCompName, WAIT_LED);
 MCP980X mcp9802(0);
 movingAvg avgTemp;
 LiquidTWI lcd(0); //i2c address 0 (0x20)
-Button btnMode(MODE_BUTTON, PULLUP, INVERT, DEBOUNCE_MS);
+Button btnSet(SET_BUTTON, PULLUP, INVERT, DEBOUNCE_MS);
+Button btnUp(UP_BUTTON, PULLUP, INVERT, DEBOUNCE_MS);
+Button btnDn(DN_BUTTON, PULLUP, INVERT, DEBOUNCE_MS);
 
 //trap the MCUSR value after reset to determine the reset source
 //and ensure the watchdog is reset. this code does not work with a bootloader.
@@ -105,7 +115,7 @@ void setup(void)
     pinMode(NTP_LED, OUTPUT);
     pinMode(WAIT_LED, OUTPUT);
     pinMode(GM_INPUT, INPUT_PULLUP);
-    
+
     //report the reset source
     Serial.begin(115200);
     Serial << endl << millis() << F(" MCU reset 0x0") << _HEX(mcusr);
@@ -121,14 +131,15 @@ void setup(void)
         gmIntervalIdx = gmIntervalIdx_DEFAULT;
         eeprom_write_byte( &ee_gmIntervalIdx, gmIntervalIdx);
     }
-    
+
     //same for the time zone index
     tzIndex = eeprom_read_byte( &ee_tzIndex );
-    if ( tzIndex >= sizeof(tzNames)/sizeof(tzNames[0]) ) {
+    if ( tzIndex >= sizeof(tzNames) / sizeof(tzNames[0]) ) {
         tzIndex = 0;
         eeprom_write_byte( &ee_tzIndex, tzIndex);
     }
     tz = timezones[tzIndex];                //set the tz
+//    tz = timezones[1];                      //eastern time -- FOR TEST ONLY UNTIL MENUS ARE IMPLEMENTED
 
     //device inits
     delay(1);
@@ -188,6 +199,7 @@ void setup(void)
     delay(1000);
 
     lcd.clear();
+    lcd << F("NTP Sync...");
 
     //set system time from RTC
     utc = RTC.get();
@@ -207,26 +219,29 @@ enum STATE_t { INIT, RUN } STATE;
 
 void loop(void)
 {
-    time_t local;
+    //    static uint16_t loopCount;
+    static time_t utcLast;
     static time_t nextTransmit;          //time for next data transmission
     static time_t nextTimePrint;         //next time to print the local time to serial
     static char buf[96];
     static uint8_t socketsAvailable;
     static int tF10;
-//    static uint16_t loopCount;
     static int rtcSet;
     static int cpm;
     static bool haveCPM = false;
 
     wdt_reset();
-    btnMode.read();
+    utc = NTP.now();
+    btnSet.read();
+    btnUp.read();
+    btnDn.read();
     countLED.run();
 
-    //check for data from the gc
+    //check for data from the G-M counter
     if (GEIGER.run(&cpm, utc)) {
         haveCPM = true;
         timeStamp(Serial, utc);
-        Serial << cpm << F(" COUNTS/MIN") << endl;
+        Serial << F("G-M counts/min ") << cpm << endl;
     }
 
     if ( GEIGER.pulse() ) countLED.on();    //blip the LED
@@ -241,9 +256,10 @@ void loop(void)
         printDateTime(utc);
         ++rtcSet;
     }
-    digitalWrite(NTP_LED, NTP.syncStatus == STATUS_RECD);
-    
+//    digitalWrite(NTP_LED, NTP.syncStatus == STATUS_RECD);    //MOVE THIS FUNCTIONALITY TO NTP CLASS!
+
     int gsStatus = GS.run();            //run the GroveStreams state machine
+    runDisplay(tF10, cpm);       //run the LCD display
 
     switch (STATE) {
 
@@ -262,29 +278,28 @@ void loop(void)
             if (mcusr & _BV(BORF))  strcat(buf, "%20BORF");
             if (mcusr & _BV(EXTRF)) strcat(buf, "%20EXTRF");
             if (mcusr & _BV(PORF))  strcat(buf, "%20PORF");
+//TO DO: Think about whether anything should be done if this send fails. Think about delay between this message send and the first data send.
             GS.send(buf);
         }
         break;
 
     case RUN:
-        utc = NTP.now();
-//        ++loopCount;
+        //        ++loopCount;
 
         //process user button input
-        if (btnMode.wasPressed()) {
-            NTP.schedSync(5);
-            Serial << millis() << F(" NTP Sync in 5 seconds") << endl;
-        }
+        //        if (btnMode.wasPressed()) {
+        //            NTP.schedSync(5);
+        //            Serial << millis() << F(" NTP Sync in 5 seconds") << endl;
+        //        }
 
         if (utc != utcLast) {                 //once-per-second processing
             utcLast = utc;
-//            Serial << millis() << ' ';
-//            printTime(utc);
-//            Serial << F(" loopCount=") << loopCount << endl;
-//            loopCount = 0;
+            //            Serial << millis() << ' ';
+            //            printTime(utc);
+            //            Serial << F(" loopCount=") << loopCount << endl;
+            //            loopCount = 0;
             uint8_t utcM = minute(utc);
             uint8_t utcS = second(utc);
-            local = (*tz).toLocal(utc);
 
             if (utc >= nextTransmit) {        //time to send data?
                 nextTransmit += 60;
@@ -314,8 +329,6 @@ void loop(void)
             if ( utcS % 10 == 0 ) {           //read temperature every 10 sec
                 tF10 = avgTemp.reading( mcp9802.readTempF10(AMBIENT) );
             }
-            
-            runDisplay(local, tF10, cpm);
 
             if (utc >= nextTimePrint) {             //print time to Serial once per minute
                 Serial << endl << millis() << F(" Local: ");
@@ -334,27 +347,87 @@ void loop(void)
     }
 }
 
-void runDisplay(time_t t, int tF10, int cpm)
+enum dispStates_t { DISP_CLOCK, SET_TZ, SET_INTERVAL } DISP_STATE;
+
+void runDisplay(int tF10, int cpm)
 {
+    static time_t utcLast;
     static uint8_t dispMode;
     char lcdBuf[18];
     const char spaces[8] = "      ";
     const char cpmText[] = " counts/min";
-    
-    lcd.setCursor(0, 0);        //lcd display, time & temp on first row
-    printTime(lcd, t);
-    lcd << tF10 / 10 << '.' << tF10 % 10 << '\xDF';
-    lcd.setCursor(0, 1);        //move to second row
-    if (dispMode >= 2) {
-        printDayDate(lcd, t);
+
+    switch (DISP_STATE)
+    {
+    case DISP_CLOCK:
+        if (btnSet.wasReleased()) {
+            DISP_STATE = SET_TZ;
+            lcd.clear();
+            lcd << F("Timezone:");
+            lcd.setCursor(0, 1);
+            lcd << tzNames[tzIndex];
+        }
+        if (utc != utcLast) {
+            utcLast = utc;
+            local = (*tz).toLocal(utc, &tcr);
+            lcd.setCursor(0, 0);        //lcd display, time & temp on first row
+            printTime(lcd, local);
+            lcd << tcr -> abbrev << ' ' << (tF10 + 5) / 10 << '\xDF';
+            lcd.setCursor(0, 1);        //move to second row
+            if (dispMode >= 2) {
+                printDayDate(lcd, local);
+            }
+            else {
+                itoa(cpm, lcdBuf, 10);
+                strcat(lcdBuf, cpmText);
+                strncat( lcdBuf, spaces, 16 - strlen(lcdBuf) );
+                lcd << lcdBuf;
+            }
+            if (++dispMode >= 4) dispMode = 0;
+        }
+        break;
+
+    case SET_TZ:
+        if (btnSet.wasReleased()) {
+            DISP_STATE = SET_INTERVAL;
+            tz = timezones[tzIndex];
+            eeprom_update_byte( &ee_tzIndex, tzIndex );
+            lcd.clear();
+            lcd << F("Geiger interval:");
+            lcd.setCursor(0, 1);
+            lcd << gmIntervals[gmIntervalIdx] << F(" minute") << ( (gmIntervals[gmIntervalIdx] > 1) ? "s  " : "   ");
+        }
+        else if (btnUp.wasPressed()) {
+            if ( ++tzIndex >= sizeof(tzNames) / sizeof(tzNames[0]) ) tzIndex = 0;
+            lcd.setCursor(0, 1);
+            lcd << tzNames[tzIndex];
+        }
+        else if (btnDn.wasPressed()) {
+            if ( --tzIndex >= sizeof(tzNames) / sizeof(tzNames[0]) ) tzIndex = sizeof(tzNames) / sizeof(tzNames[0]) - 1;
+            lcd.setCursor(0, 1);
+            lcd << tzNames[tzIndex];
+        }
+        break;
+
+    case SET_INTERVAL:
+        if (btnSet.wasReleased()) {
+            DISP_STATE = DISP_CLOCK;
+            lcd.clear();
+            GEIGER.setInterval( gmIntervals[gmIntervalIdx] );
+            eeprom_update_byte(  &ee_gmIntervalIdx, gmIntervalIdx );
+        }
+        else if (btnUp.wasPressed()) {
+            if ( ++gmIntervalIdx >= sizeof(gmIntervals) / sizeof(gmIntervals[0]) ) gmIntervalIdx = 0;
+            lcd.setCursor(0, 1);
+            lcd << gmIntervals[gmIntervalIdx] << F(" minute") << ( (gmIntervals[gmIntervalIdx] > 1) ? "s  " : "   ");
+        }
+        else if (btnDn.wasPressed()) {
+            if ( --gmIntervalIdx >= sizeof(gmIntervals) / sizeof(gmIntervals[0]) ) gmIntervalIdx = sizeof(gmIntervals) / sizeof(gmIntervals[0]) - 1;
+            lcd.setCursor(0, 1);
+            lcd << gmIntervals[gmIntervalIdx] << F(" minute") << ( (gmIntervals[gmIntervalIdx] > 1) ? "s  " : "   ");
+        }
+        break;
     }
-    else {
-        itoa (cpm, lcdBuf, 10);
-        strcat(lcdBuf, cpmText);
-        strncat( lcdBuf, spaces, 16 - strlen(lcdBuf) );
-        lcd << lcdBuf;
-    }
-    if (++dispMode >= 4) dispMode = 0;
 }
 
 byte socketStat[MAX_SOCK_NUM];
@@ -397,13 +470,17 @@ uint8_t showSockStatus()
         uint8_t dip[4];
         W5100.readSnDIPR(i, dip);
         for (int j=0; j<4; j++) {
-          Serial.print(dip[j],10);
-          if (j<3) Serial.print(".");
+            Serial.print(dip[j],10);
+            if (j<3) Serial.print(".");
         }
         Serial.print(F("("));
         Serial.print(W5100.readSnDPORT(i));
         Serial.println(F(")"));
-      }
+    }
     return nAvailable;
 }
+
+
+
+
 

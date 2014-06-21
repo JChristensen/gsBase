@@ -56,10 +56,19 @@ void getMAC(uint8_t* mac)
     Wire.beginTransmission(EEPROM_ADDR);
     Wire.write(MAC_ADDR);
     Wire.endTransmission();
-    
+
     Wire.requestFrom(EEPROM_ADDR, 6);
     for (uint8_t i = 0; i < 6; i++) {
         *(mac + i) = Wire.read();
     }
 }
 
+//calculate the next time where seconds = 0
+time_t nextMinute()
+{
+    tmElements_t tm;
+
+    breakTime(NTP.now(), tm);
+    tm.Second = 0;
+    return makeTime(tm) + 60;
+}
