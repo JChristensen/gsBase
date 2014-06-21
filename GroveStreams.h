@@ -1,10 +1,9 @@
-//to do
+//TO DO
 //Count errors, meaning any of: SEND_BUSY, CONNECT_FAILED, TIMEOUT, HTTP_OTHER
 //Reset count when HTTP_OK occurs.  WDT reset if three consecutive errors.
 //Use WDT in main loop? (8 sec).
 //
 //Pullups on unused pins
-
 
 //GroveStreams Class
 #ifndef _GROVESTREAMS_H
@@ -63,5 +62,3 @@ class GroveStreams
 };
 
 #endif
-
-

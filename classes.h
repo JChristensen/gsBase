@@ -1,8 +1,11 @@
+// geiger and oneShotLED classes
+
 #include <util/Atomic.h>
 #include <Arduino.h>
 #include <Time.h>
 #include <Streaming.h>    //http://arduiniana.org/libraries/streaming/
 
+//TO DO: Is timeStamp() a redundant function?
 void timeStamp(Print& p, time_t t);
 
 volatile bool _pulse;             //ISR pulse flag
@@ -179,5 +182,3 @@ void oneShotLED::on(void)
     _msOn = millis();
     digitalWrite(_pin, HIGH);
 }
-
-

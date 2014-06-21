@@ -26,7 +26,7 @@ void GroveStreams::begin(void)
 
 enum gsState_t { GS_WAIT, GS_SEND, GS_RECV, GS_DISCONNECT } GS_STATE;
 
-//to do: differentiate additional statuses
+//TO DO: differentiate additional statuses
 //connect fail -- put fail (200 OK not recd) -- timeout -- ???
 //status 0 = ok, !0 = error
 //count errors, reset MCU after n consecutive errors
@@ -162,4 +162,3 @@ ethernetStatus_t GroveStreams::run(void)
     }
     return ret;
 }
-

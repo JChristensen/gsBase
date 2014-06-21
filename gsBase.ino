@@ -1,7 +1,6 @@
 //Check fuses: H:FD, E:D6, L:FF (preserve EEPROM thru chip erase)
 
 #include <utility/w5100.h>
-//#include <util/atomic.h>
 #include <Button.h>                 //http://github.com/JChristensen/Button
 #include <DS3232RTC.h>              //http://github.com/JChristensen/DS3232RTC
 #include <avr/eeprom.h>
@@ -18,6 +17,8 @@
 #include <Wire.h>                   //http://arduino.cc/en/Reference/Wire
 #include "GroveStreams.h"
 #include "classes.h"
+
+//#define COUNT_LOOPS                 //count RUN state loops/sec
 
 //pin assignments
 const uint8_t INT2_PIN = 2;             //RTC interrupt
@@ -46,11 +47,6 @@ const unsigned long DEBOUNCE_MS = 25;
 
 const uint8_t maxNtpTimeouts = 3;
 ntpClass NTP(maxNtpTimeouts, NTP_LED);
-
-//US Eastern Time Zone (New York, Detroit)
-//TimeChangeRule myDST = { "EDT", Second, Sun, Mar, 2, -240 };    //Daylight time = UTC - 4 hours
-//TimeChangeRule mySTD = { "EST", First, Sun, Nov, 2, -300 };     //Standard time = UTC - 5 hours
-//Timezone myTZ(myDST, mySTD);
 
 //Continental US Time Zones
 TimeChangeRule EDT = { "EDT", Second, Sun, Mar, 2, -240 };    //Daylight time = UTC - 4 hours
@@ -139,7 +135,6 @@ void setup(void)
         eeprom_write_byte( &ee_tzIndex, tzIndex);
     }
     tz = timezones[tzIndex];                //set the tz
-//    tz = timezones[1];                      //eastern time -- FOR TEST ONLY UNTIL MENUS ARE IMPLEMENTED
 
     //device inits
     delay(1);
@@ -219,7 +214,9 @@ enum STATE_t { INIT, RUN } STATE;
 
 void loop(void)
 {
-    //    static uint16_t loopCount;
+#ifdef COUNT_LOOPS
+    static uint16_t loopCount;
+#endif
     static time_t utcLast;
     static time_t nextTransmit;          //time for next data transmission
     static time_t nextTimePrint;         //next time to print the local time to serial
@@ -246,7 +243,7 @@ void loop(void)
 
     if ( GEIGER.pulse() ) countLED.on();    //blip the LED
 
-    bool ntpSync = NTP.run();            //run the NTP state machine
+    bool ntpSync = NTP.run();               //run the NTP state machine
     if (ntpSync && NTP.lastSyncType == TYPE_PRECISE) {
         utc = NTP.now();
         RTC.squareWave(SQWAVE_NONE);
@@ -256,13 +253,12 @@ void loop(void)
         printDateTime(utc);
         ++rtcSet;
     }
-//    digitalWrite(NTP_LED, NTP.syncStatus == STATUS_RECD);    //MOVE THIS FUNCTIONALITY TO NTP CLASS!
 
-    int gsStatus = GS.run();            //run the GroveStreams state machine
-    runDisplay(tF10, cpm);       //run the LCD display
+    int gsStatus = GS.run();                //run the GroveStreams state machine
+    runDisplay(tF10, cpm);                  //run the LCD display
 
-    switch (STATE) {
-
+    switch (STATE)
+    {
     case INIT:
         //wait until we have a good time from the NTP server
         if ( (ntpSync && NTP.lastSyncType == TYPE_PRECISE) || NTP.lastSyncType == TYPE_SKIPPED ) {
@@ -284,7 +280,9 @@ void loop(void)
         break;
 
     case RUN:
-        //        ++loopCount;
+#ifdef COUNT_LOOPS
+        ++loopCount;
+#endif
 
         //process user button input
         //        if (btnMode.wasPressed()) {
@@ -294,12 +292,14 @@ void loop(void)
 
         if (utc != utcLast) {                 //once-per-second processing
             utcLast = utc;
-            //            Serial << millis() << ' ';
-            //            printTime(utc);
-            //            Serial << F(" loopCount=") << loopCount << endl;
-            //            loopCount = 0;
             uint8_t utcM = minute(utc);
             uint8_t utcS = second(utc);
+#ifdef COUNT_LOOPS
+            Serial << millis() << ' ';
+            printTime(utc);
+            Serial << F(" loopCount=") << loopCount << endl;
+            loopCount = 0;
+#endif
 
             if (utc >= nextTransmit) {        //time to send data?
                 nextTransmit += 60;
@@ -479,8 +479,3 @@ uint8_t showSockStatus()
     }
     return nAvailable;
 }
-
-
-
-
-

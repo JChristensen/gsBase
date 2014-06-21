@@ -51,10 +51,10 @@ void timeStamp(Print& p, time_t t)
 void getMAC(uint8_t* mac)
 {
     const int EEPROM_ADDR = 0x50;
-    const uint8_t MAC_ADDR = 0xFA;
+    const uint8_t UID_ADDR = 0xFA;
 
     Wire.beginTransmission(EEPROM_ADDR);
-    Wire.write(MAC_ADDR);
+    Wire.write(UID_ADDR);
     Wire.endTransmission();
 
     Wire.requestFrom(EEPROM_ADDR, 6);
