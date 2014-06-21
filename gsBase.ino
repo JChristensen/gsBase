@@ -21,32 +21,54 @@
 //#define COUNT_LOOPS                 //count RUN state loops/sec
 
 //pin assignments
-const uint8_t INT2_PIN = 2;             //RTC interrupt
-const uint8_t GM_INPUT = 10;            //INT0
-const uint8_t WIZ_RESET = 12;           //WIZnet module reset pin
-const uint8_t HB_LED = 13;              //heartbeat LED
-const uint8_t NTP_LED = 14;             //ntp time sync
-const uint8_t WAIT_LED = 15;            //waiting for server response
-const uint8_t GM_PULSE_LED = 18;        //the LED to blink
-const uint8_t SET_BUTTON = 19;
-const uint8_t UP_BUTTON = 20;
-const uint8_t DN_BUTTON = 21;
-const uint8_t GM_POWER = 22;            //geiger power enable pin
+const uint8_t INT2_PIN = 2;         //RTC interrupt
+const uint8_t GM_INPUT = 10;        //INT0
+const uint8_t WIZ_RESET = 12;       //WIZnet module reset pin
+const uint8_t HB_LED = 13;          //heartbeat LED
+const uint8_t NTP_LED = 14;         //ntp time sync
+const uint8_t WAIT_LED = 15;        //waiting for server response
+const uint8_t GM_PULSE_LED = 18;    //the LED to blink
+const uint8_t SET_BUTTON = 19;      //set button
+const uint8_t UP_BUTTON = 20;       //up button
+const uint8_t DN_BUTTON = 21;       //down button
+const uint8_t GM_POWER = 22;        //geiger power enable pin
 
-uint8_t gmIntervalIdx;                      //index to geiger sample interval array
-EEMEM uint8_t ee_gmIntervalIdx;             //copy persisted in EEPROM
+//global variables
+const int txSec = 10;               //transmit data once per minute, on this second
+time_t utc, local;                  //current times
+uint8_t gmIntervalIdx;              //index to geiger sample interval array
+EEMEM uint8_t ee_gmIntervalIdx;     //copy persisted in EEPROM
 const uint8_t gmIntervalIdx_DEFAULT = 2;    //index to the default value (i.e. 2 -> 10 min)
 const int gmIntervals[] = { 1, 5, 10, 15, 20, 30, 60 };
 
-const unsigned long PULSE_DUR = 50;         //blink duration for the LED, ms
-oneShotLED countLED;
+//object instantiations
+char gsServer[] = "grovestreams.com";
+char* PROGMEM gsOrgID = "66d58106-8c04-34d9-9e8c-17499a8942d7";
+char* PROGMEM gsApiKey = "cbc8d222-6f25-3e26-9f6e-edfc3364d7fd";
+char* PROGMEM gsCompID = "Test-2";
+char* PROGMEM gsCompName = "Test-2";
+GroveStreams GS(gsServer, gsOrgID, gsApiKey, gsCompID, gsCompName, WAIT_LED);
+
+const uint8_t maxNtpTimeouts = 3;
+ntpClass NTP(maxNtpTimeouts, NTP_LED);
+
+EthernetClient client;
+
+MCP980X mcp9802(0);
+
+movingAvg avgTemp;
+
+LiquidTWI lcd(0); //i2c address 0 (0x20)
 
 const bool PULLUP = true;
 const bool INVERT = true;
 const unsigned long DEBOUNCE_MS = 25;
+Button btnSet(SET_BUTTON, PULLUP, INVERT, DEBOUNCE_MS);
+Button btnUp(UP_BUTTON, PULLUP, INVERT, DEBOUNCE_MS);
+Button btnDn(DN_BUTTON, PULLUP, INVERT, DEBOUNCE_MS);
 
-const uint8_t maxNtpTimeouts = 3;
-ntpClass NTP(maxNtpTimeouts, NTP_LED);
+const unsigned long PULSE_DUR = 50; //blink duration for the G-M one-shot LED, ms
+oneShotLED countLED;
 
 //Continental US Time Zones
 TimeChangeRule EDT = { "EDT", Second, Sun, Mar, 2, -240 };    //Daylight time = UTC - 4 hours
@@ -64,30 +86,11 @@ Timezone Pacific(PDT, PST);
 TimeChangeRule utcRule = { "UTC", First, Sun, Nov, 2, 0 };    //No change for UTC
 Timezone UTC(utcRule, utcRule);
 Timezone *timezones[] = { &UTC, &Eastern, &Central, &Mountain, &Pacific };
-Timezone *tz;               //pointer to the time zone
-uint8_t tzIndex;            //index to the timezones[] array and the tzNames[] array
-EEMEM uint8_t ee_tzIndex;   //copy persisted in EEPROM
 char *tzNames[] = { "UTC     ", "Eastern ", "Central ", "Mountain", "Pacific " };
-TimeChangeRule *tcr;        //pointer to the time change rule, use to get TZ abbrev
-
-EthernetClient client;
-int txSec = 10;                         //transmit data once per minute, on this second
-time_t utc, local;
-
-//GroveStreams
-char gsServer[] = "grovestreams.com";
-char* PROGMEM gsOrgID = "66d58106-8c04-34d9-9e8c-17499a8942d7";
-char* PROGMEM gsApiKey = "cbc8d222-6f25-3e26-9f6e-edfc3364d7fd";
-char* PROGMEM gsCompID = "Test-2";
-char* PROGMEM gsCompName = "Test-2";
-GroveStreams GS(gsServer, gsOrgID, gsApiKey, gsCompID, gsCompName, WAIT_LED);
-
-MCP980X mcp9802(0);
-movingAvg avgTemp;
-LiquidTWI lcd(0); //i2c address 0 (0x20)
-Button btnSet(SET_BUTTON, PULLUP, INVERT, DEBOUNCE_MS);
-Button btnUp(UP_BUTTON, PULLUP, INVERT, DEBOUNCE_MS);
-Button btnDn(DN_BUTTON, PULLUP, INVERT, DEBOUNCE_MS);
+Timezone *tz;                       //pointer to the time zone
+uint8_t tzIndex;                    //index to the timezones[] array and the tzNames[] array
+EEMEM uint8_t ee_tzIndex;           //copy persisted in EEPROM
+TimeChangeRule *tcr;                //pointer to the time change rule, use to get TZ abbrev
 
 //trap the MCUSR value after reset to determine the reset source
 //and ensure the watchdog is reset. this code does not work with a bootloader.
@@ -349,6 +352,7 @@ void loop(void)
 
 enum dispStates_t { DISP_CLOCK, SET_TZ, SET_INTERVAL } DISP_STATE;
 
+//user interface, display and buttons
 void runDisplay(int tF10, int cpm)
 {
     static time_t utcLast;
