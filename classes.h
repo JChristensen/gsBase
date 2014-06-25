@@ -28,6 +28,7 @@ class geiger
         void setInterval(int sampleInterval);
 
     private:
+        bool _started;
         int _sampleInterval;
         time_t _nextSampleTime;
         bool _continuous;            //sample continuously
@@ -49,6 +50,7 @@ void geiger::begin(int sampleInterval, uint8_t powerPin, time_t utc)
     digitalWrite(_powerPin, LOW);
     pinMode(_powerPin, OUTPUT);
     setInterval(sampleInterval);
+    _started = true;
 }
 
 void geiger::setInterval(int sampleInterval)
@@ -65,78 +67,81 @@ bool geiger::run(int* count, time_t utc)
 {
     bool ret = false;
 
-    switch (gmState) {
-    case gmINIT:
-        gmState = gmWAIT;
-        digitalWrite(_powerPin, LOW);   //if interval is changed while collect is in progress, it gets aborted, so ensure the power is turned off here
-        _nextSampleTime = utc + _sampleInterval - utc % _sampleInterval;    //next "neat" time
-        if (_nextSampleTime - utc < WARMUP_TIME) _nextSampleTime += _sampleInterval;    //make sure not too soon
-        timeStamp(Serial, utc);
-        Serial << F("G-M wait, next sample: ");
-        timeStamp(Serial, _nextSampleTime);
-        Serial << endl;
-        break;
-
-    case gmWAIT:
-        if (utc >= _nextSampleTime - WARMUP_TIME) {
-            gmState = gmWARMUP;
-            digitalWrite(_powerPin, HIGH);
+    if (_started) {
+        switch (gmState)
+        {
+        case gmINIT:
+            gmState = gmWAIT;
+            digitalWrite(_powerPin, LOW);   //if interval is changed while collect is in progress, it gets aborted, so ensure the power is turned off here
+            _nextSampleTime = utc + _sampleInterval - utc % _sampleInterval;    //next "neat" time
+            if (_nextSampleTime - utc < WARMUP_TIME) _nextSampleTime += _sampleInterval;    //make sure not too soon
             timeStamp(Serial, utc);
-            Serial << F("G-M warmup, power on") << endl;
-        }
-        break;
-
-    case gmWARMUP:
-        if (utc >= _nextSampleTime) {
-            gmState = _continuous ? gmCONTINUOUS : gmCOLLECT;
-            timeStamp(Serial, utc);
-            Serial << F("G-M collect") << endl;
-            ATOMIC_BLOCK(ATOMIC_RESTORESTATE) {
-                _count = 0;
-                _pulse = false;
-            }
-            EIFR |= _BV(INTF0);                  //ensure interrupt flag is cleared
-            EIMSK |= _BV(INT0);                  //enable the interrupt
-        }
-        break;
-
-    case gmCOLLECT:
-        if (utc >= _nextSampleTime + 60) {
-            EIMSK &= ~_BV(INT0);                 //disable the interrupt
-            ATOMIC_BLOCK(ATOMIC_RESTORESTATE) {
-                *count = _count;
-                _count = 0;
-                _pulse = false;
-            }
-            _nextSampleTime += _sampleInterval;
-            timeStamp(Serial, utc);
-//            Serial << F("G-M wait") << endl;
             Serial << F("G-M wait, next sample: ");
             timeStamp(Serial, _nextSampleTime);
             Serial << endl;
-            gmState = gmWAIT;
-            digitalWrite(_powerPin, LOW);
-            ret = true;
-        }
-        break;
-
-    case gmCONTINUOUS:
-        if (utc >= _nextSampleTime + 60) {
-            ATOMIC_BLOCK(ATOMIC_RESTORESTATE) {
-                *count = _count;
-                _count = 0;
-                _pulse = false;
+            break;
+    
+        case gmWAIT:
+            if (utc >= _nextSampleTime - WARMUP_TIME) {
+                gmState = gmWARMUP;
+                digitalWrite(_powerPin, HIGH);
+                timeStamp(Serial, utc);
+                Serial << F("G-M warmup, power on") << endl;
             }
-            _nextSampleTime += _sampleInterval;
-            timeStamp(Serial, utc);
-            Serial << F("G-M continuous, next sample: ");
-            timeStamp(Serial, _nextSampleTime);
-            Serial << endl;
-            ret = true;
+            break;
+    
+        case gmWARMUP:
+            if (utc >= _nextSampleTime) {
+                gmState = _continuous ? gmCONTINUOUS : gmCOLLECT;
+                timeStamp(Serial, utc);
+                Serial << F("G-M collect") << endl;
+                ATOMIC_BLOCK(ATOMIC_RESTORESTATE) {
+                    _count = 0;
+                    _pulse = false;
+                }
+                EIFR |= _BV(INTF0);                  //ensure interrupt flag is cleared
+                EIMSK |= _BV(INT0);                  //enable the interrupt
+            }
+            break;
+    
+        case gmCOLLECT:
+            if (utc >= _nextSampleTime + 60) {
+                EIMSK &= ~_BV(INT0);                 //disable the interrupt
+                ATOMIC_BLOCK(ATOMIC_RESTORESTATE) {
+                    *count = _count;
+                    _count = 0;
+                    _pulse = false;
+                }
+                _nextSampleTime += _sampleInterval;
+                timeStamp(Serial, utc);
+    //            Serial << F("G-M wait") << endl;
+                Serial << F("G-M wait, next sample: ");
+                timeStamp(Serial, _nextSampleTime);
+                Serial << endl;
+                gmState = gmWAIT;
+                digitalWrite(_powerPin, LOW);
+                ret = true;
+            }
+            break;
+    
+        case gmCONTINUOUS:
+            if (utc >= _nextSampleTime + 60) {
+                ATOMIC_BLOCK(ATOMIC_RESTORESTATE) {
+                    *count = _count;
+                    _count = 0;
+                    _pulse = false;
+                }
+                _nextSampleTime += _sampleInterval;
+                timeStamp(Serial, utc);
+                Serial << F("G-M continuous, next sample: ");
+                timeStamp(Serial, _nextSampleTime);
+                Serial << endl;
+                ret = true;
+            }
+            break;
         }
-        break;
-    }
     return ret;
+    }
 }
 
 //return true if a pulse was detected since last call

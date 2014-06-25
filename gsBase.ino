@@ -210,7 +210,6 @@ void setup(void)
     printDateTime(utc);
 
     countLED.begin(GM_PULSE_LED, PULSE_DUR);
-    GEIGER.begin(gmIntervals[gmIntervalIdx], GM_POWER, utc);
 }
 
 enum STATE_t { INIT, RUN } STATE;
@@ -279,6 +278,7 @@ void loop(void)
             if (mcusr & _BV(PORF))  strcat(buf, "%20PORF");
 //TO DO: Think about whether anything should be done if this send fails. Think about delay between this message send and the first data send.
             GS.send(buf);
+            GEIGER.begin(gmIntervals[gmIntervalIdx], GM_POWER, utc);
         }
         break;
 
