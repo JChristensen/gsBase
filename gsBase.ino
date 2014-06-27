@@ -1,12 +1,18 @@
-//Check fuses: H:FD, E:D6, L:FF (preserve EEPROM thru chip erase)
+//TO DO:  Add uptime stat
+//        Diagnostic stats on/off, EEPROM parameter
+//        Base data: seq, temp, cpm, messages
+//        Diagnostic stats: success, fail, timeout, connTime, respTime, discTime, freeMem, RTC sets, sockets(?)
+//        LCD stats: uptime, success, fail, timeout, memory, sockets(?)
 
+//Set fuses: E:FD, H:D6, L:FF (preserve EEPROM thru chip erase)
+
+#include <avr/eeprom.h>
 #include <utility/w5100.h>
 #include <Button.h>                 //http://github.com/JChristensen/Button
 #include <DS3232RTC.h>              //http://github.com/JChristensen/DS3232RTC
-#include <avr/eeprom.h>
 #include <Ethernet.h>               //http://arduino.cc/en/Reference/Ethernet
-#include <MCP980X.h>
 #include <LiquidTWI.h>              //http://forums.adafruit.com/viewtopic.php?f=19&t=21586&p=113177
+#include <MCP980X.h>                //http://github.com/JChristensen/MCP980X
 #include <MemoryFree.h>             //http://playground.arduino.cc/Code/AvailableMemory
 #include <movingAvg.h>              //http://github.com/JChristensen/movingAvg
 #include <NTP.h>
@@ -15,23 +21,23 @@
 #include <Time.h>                   //http://www.arduino.cc/playground/Code/Time
 #include <Timezone.h>               //http://github.com/JChristensen/Timezone
 #include <Wire.h>                   //http://arduino.cc/en/Reference/Wire
-#include "GroveStreams.h"
-#include "classes.h"
+#include "GroveStreams.h"           //part of this project
+#include "classes.h"                //part of this project
 
 //#define COUNT_LOOPS                 //count RUN state loops/sec
 
 //pin assignments
-const uint8_t INT2_PIN = 2;         //RTC interrupt
-const uint8_t GM_INPUT = 10;        //INT0
-const uint8_t WIZ_RESET = 12;       //WIZnet module reset pin
+const uint8_t RTC_1HZ = 2;          //RTC 1Hz interrupt, INT2
+const uint8_t GM_INPUT = 10;        //G-M pulse interrupt, INT0
+const uint8_t WIZ_RESET = 12;       //WIZnet module reset
 const uint8_t HB_LED = 13;          //heartbeat LED
 const uint8_t NTP_LED = 14;         //ntp time sync
 const uint8_t WAIT_LED = 15;        //waiting for server response
-const uint8_t GM_PULSE_LED = 18;    //the LED to blink
+const uint8_t GM_PULSE_LED = 18;    //blink on pulse from G-M counter
 const uint8_t SET_BUTTON = 19;      //set button
 const uint8_t UP_BUTTON = 20;       //up button
 const uint8_t DN_BUTTON = 21;       //down button
-const uint8_t GM_POWER = 22;        //geiger power enable pin
+const uint8_t GM_POWER = 22;        //geiger power enable
 
 //global variables
 const int txSec = 10;               //transmit data once per minute, on this second
@@ -42,12 +48,11 @@ const uint8_t gmIntervalIdx_DEFAULT = 2;    //index to the default value (i.e. 2
 const int gmIntervals[] = { 1, 5, 10, 15, 20, 30, 60 };
 
 //object instantiations
-char gsServer[] = "grovestreams.com";
-char* PROGMEM gsOrgID = "66d58106-8c04-34d9-9e8c-17499a8942d7";
-char* PROGMEM gsApiKey = "cbc8d222-6f25-3e26-9f6e-edfc3364d7fd";
-char* PROGMEM gsCompID = "Test-2";
-char* PROGMEM gsCompName = "Test-2";
-GroveStreams GS(gsServer, gsOrgID, gsApiKey, gsCompID, gsCompName, WAIT_LED);
+const char* gsServer = "grovestreams.com";
+const char* PROGMEM gsOrgID = "66d58106-8c04-34d9-9e8c-17499a8942d7";
+const char* PROGMEM gsApiKey = "cbc8d222-6f25-3e26-9f6e-edfc3364d7fd";
+const char* PROGMEM gsCompID = "Test-2";    //GMGB, GMMV
+GroveStreams GS(gsServer, gsOrgID, gsApiKey, gsCompID, WAIT_LED);
 
 const uint8_t maxNtpTimeouts = 3;
 ntpClass NTP(maxNtpTimeouts, NTP_LED);
@@ -85,12 +90,12 @@ TimeChangeRule PST = { "PST", First, Sun, Nov, 2, -480 };     //Standard time = 
 Timezone Pacific(PDT, PST);
 TimeChangeRule utcRule = { "UTC", First, Sun, Nov, 2, 0 };    //No change for UTC
 Timezone UTC(utcRule, utcRule);
-Timezone *timezones[] = { &UTC, &Eastern, &Central, &Mountain, &Pacific };
-char *tzNames[] = { "UTC     ", "Eastern ", "Central ", "Mountain", "Pacific " };
-Timezone *tz;                       //pointer to the time zone
+Timezone* timezones[] = { &UTC, &Eastern, &Central, &Mountain, &Pacific };
+const char* tzNames[] = { "UTC     ", "Eastern ", "Central ", "Mountain", "Pacific " };
+Timezone* tz;                       //pointer to the time zone
 uint8_t tzIndex;                    //index to the timezones[] array and the tzNames[] array
 EEMEM uint8_t ee_tzIndex;           //copy persisted in EEPROM
-TimeChangeRule *tcr;                //pointer to the time change rule, use to get TZ abbrev
+TimeChangeRule* tcr;                //pointer to the time change rule, use to get TZ abbrev
 
 //trap the MCUSR value after reset to determine the reset source
 //and ensure the watchdog is reset. this code does not work with a bootloader.
@@ -108,7 +113,7 @@ void wdt_init(void)
 void setup(void)
 {
     //pin inits
-    pinMode(INT2_PIN, INPUT_PULLUP);
+    pinMode(RTC_1HZ, INPUT_PULLUP);
     pinMode(WIZ_RESET, OUTPUT);
     pinMode(HB_LED, OUTPUT);
     pinMode(NTP_LED, OUTPUT);
@@ -212,7 +217,7 @@ void setup(void)
     countLED.begin(GM_PULSE_LED, PULSE_DUR);
 }
 
-enum STATE_t { INIT, RUN } STATE;
+enum STATE_t { NTP_INIT, GS_INIT, RUN, RESET_WARN, RESET_WAIT } STATE;
 
 void loop(void)
 {
@@ -225,7 +230,7 @@ void loop(void)
     static char buf[96];
     static uint8_t socketsAvailable;
     static int tF10;
-    static int rtcSet;
+    static unsigned int rtcSet;
     static int cpm;
     static bool haveCPM = false;
 
@@ -245,8 +250,8 @@ void loop(void)
 
     if ( GEIGER.pulse() ) countLED.on();    //blip the LED
 
-    bool ntpSync = NTP.run();               //run the NTP state machine
-    if (ntpSync && NTP.lastSyncType == TYPE_PRECISE) {
+    ntpStatus_t ntpStatus = NTP.run();      //run the NTP state machine
+    if (ntpStatus == NTP_SYNC && NTP.lastSyncType == TYPE_PRECISE) {
         utc = NTP.now();
         RTC.squareWave(SQWAVE_NONE);
         RTC.set(utc + 1);
@@ -255,20 +260,23 @@ void loop(void)
         printDateTime(utc);
         ++rtcSet;
     }
+    else if (ntpStatus == NTP_RESET) {
+        STATE = RESET_WARN;
+    }
 
-    int gsStatus = GS.run();                //run the GroveStreams state machine
+    ethernetStatus_t gsStatus = GS.run();   //run the GroveStreams state machine
     runDisplay(tF10, cpm);                  //run the LCD display
 
     switch (STATE)
     {
-    case INIT:
+    static unsigned long msSend;
+
+    case NTP_INIT:
         //wait until we have a good time from the NTP server
-        if ( (ntpSync && NTP.lastSyncType == TYPE_PRECISE) || NTP.lastSyncType == TYPE_SKIPPED ) {
+        if ( (ntpStatus == NTP_SYNC && NTP.lastSyncType == TYPE_PRECISE) || NTP.lastSyncType == TYPE_SKIPPED ) {
             nextTimePrint = nextMinute();
             nextTransmit = nextTimePrint + txSec;
-            STATE = RUN;
-            Serial << millis() << F(" Init complete, begin Run state") << endl;
-            wdt_enable(WDTO_8S);
+            //build reset message, send to GroveStreams
             strcpy(buf, "&msg=MCU%20reset%200x");
             if (mcusr < 16) strcat(buf, "0");
             itoa(mcusr, buf + strlen(buf), 16);
@@ -276,9 +284,24 @@ void loop(void)
             if (mcusr & _BV(BORF))  strcat(buf, "%20BORF");
             if (mcusr & _BV(EXTRF)) strcat(buf, "%20EXTRF");
             if (mcusr & _BV(PORF))  strcat(buf, "%20PORF");
-//TO DO: Think about whether anything should be done if this send fails. Think about delay between this message send and the first data send.
+            msSend = millis();
             GS.send(buf);
+            Serial << millis() << F(" NTP init") << endl;
+            STATE = GS_INIT;
+        }
+        break;
+        
+    case GS_INIT:
+        if (gsStatus == HTTP_OK) {
+            Serial << millis() << F(" GS init") << endl;
             GEIGER.begin(gmIntervals[gmIntervalIdx], GM_POWER, utc);
+            wdt_enable(WDTO_8S);
+            STATE = RUN;
+        }
+        else if ( millis() - msSend >= 10000 ) {
+            Serial << millis() << F(" GroveStreams send fail, resetting MCU") << endl;
+            wdt_enable(WDTO_4S);
+            while (1);
         }
         break;
 
@@ -306,11 +329,11 @@ void loop(void)
 
             if (utc >= nextTransmit) {        //time to send data?
                 nextTransmit += 60;
-                sprintf(buf,"&a=%u&b=%lu&c=%lu&d=%lu&e=%u&f=%u&g=%u&h=%u&i=%i.%i&j=%u", GS.seq, GS.connTime, GS.respTime, GS.discTime, GS.success, GS.fail, GS.timeout, GS.freeMem, tF10/10, tF10%10, rtcSet);
+                sprintf(buf,"&a=%u&c=%i.%i&j=%u&k=%u&l=%u&m=%lu&n=%lu&p=%lu&q=%u&r=%u", GS.seq, tF10/10, tF10%10, GS.success, GS.fail, GS.timeout, GS.connTime, GS.respTime, GS.discTime, GS.freeMem, rtcSet);
                 if (haveCPM) {                //have a reading from the gm counter, add it on
                     char aBuf[8];
                     itoa(cpm, aBuf, 10);
-                    strcat(buf, "&k=");
+                    strcat(buf, "&b=");
                     strcat(buf, aBuf);
                     haveCPM = false;
                 }
@@ -323,8 +346,8 @@ void loop(void)
                     ++GS.fail;
                 }
                 ++GS.seq;
-                Serial << F(" seq=") << GS.seq << F(" cnct=") << GS.connTime << F(" resp=") << GS.respTime << F(" disc=") << GS.discTime << F(" success=") << GS.success;
-                Serial << F(" fail=") << GS.fail << F(" timeout=") << GS.timeout << F(" rtcSet=") << rtcSet << F(" mem=") << GS.freeMem << F(" tempF=") << tF10/10 << '.' << tF10%10 << endl;
+                Serial << F(" seq=") << GS.seq << F(" tempF=") << tF10/10 << '.' << tF10%10 << F(" success=") << GS.success << F(" fail=") << GS.fail << F(" timeout=") << GS.timeout;
+                Serial << F(" cnct=") << GS.connTime << F(" resp=") << GS.respTime << F(" disc=") << GS.discTime << F(" mem=") << GS.freeMem << F(" rtcSet=") << rtcSet << endl;
             }
 
             digitalWrite(HB_LED, !(utcS & 1));    //run the heartbeat LED
@@ -346,6 +369,18 @@ void loop(void)
                 }
             }
         }
+        break;
+
+    case RESET_WARN:
+        strcpy(buf, "&msg=Lost%20NTP%20server%20-%20reset%20MCU");
+        if (millis() - msSend >= 500) {        //keep retrying if needed
+            msSend = millis();
+            if (GS.send(buf) == SEND_ACCEPTED) STATE = RESET_WAIT;
+        }
+        break;
+
+    //All hope abandon, ye who enter here...
+    case RESET_WAIT:
         break;
     }
 }

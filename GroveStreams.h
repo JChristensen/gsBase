@@ -4,6 +4,9 @@
 //Use WDT in main loop? (8 sec).
 //
 //Pullups on unused pins
+//struct for data to be posted
+//test sprintf performance vs. DIY
+
 
 //GroveStreams Class
 #ifndef _GROVESTREAMS_H
@@ -24,12 +27,13 @@ const unsigned long RECEIVE_TIMEOUT = 10000;    //ms to wait for response from s
 class GroveStreams
 {
     public:
-        GroveStreams(char* serverName, char* PROGMEM orgID, char* PROGMEM apiKey, char* PROGMEM compID, char* PROGMEM compName, int ledPin = -1);
+        GroveStreams( const char* serverName, const char* PROGMEM orgID, const char* PROGMEM apiKey, const char* PROGMEM compID, int ledPin = -1);
         void begin(void);
         ethernetStatus_t send(char* data);
         ethernetStatus_t run(void);
 
         IPAddress serverIP;
+        ethernetStatus_t lastStatus;
 
         //data to be posted
         unsigned int seq;                   //post sequence number
@@ -43,11 +47,10 @@ class GroveStreams
 
     private:
         ethernetStatus_t _xmit(void);
-        char* _serverName;
-        char* PROGMEM _orgID;
-        char* PROGMEM _apiKey;
-        char* PROGMEM _compID;              //component ID
-        char* PROGMEM _compName;            //component name
+        const char* _serverName;
+        const char* PROGMEM _orgID;
+        const char* PROGMEM _apiKey;
+        const char* PROGMEM _compID;              //component ID
 
         char* _data;
         unsigned long _msConnect;

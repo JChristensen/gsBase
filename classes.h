@@ -1,3 +1,5 @@
+//TO DO: Is timeStamp() a redundant function?
+
 // geiger and oneShotLED classes
 
 #include <util/Atomic.h>
@@ -5,7 +7,6 @@
 #include <Time.h>
 #include <Streaming.h>    //http://arduiniana.org/libraries/streaming/
 
-//TO DO: Is timeStamp() a redundant function?
 void timeStamp(Print& p, time_t t);
 
 volatile bool _pulse;             //ISR pulse flag
@@ -140,8 +141,8 @@ bool geiger::run(int* count, time_t utc)
             }
             break;
         }
-    return ret;
     }
+    return ret;
 }
 
 //return true if a pulse was detected since last call
@@ -150,7 +151,7 @@ bool geiger::pulse(void)
     bool p;
 
     ATOMIC_BLOCK(ATOMIC_RESTORESTATE) {
-        if (p = _pulse) _pulse = false;
+        if ( (p = _pulse) ) _pulse = false;
     }
     return p;
 }

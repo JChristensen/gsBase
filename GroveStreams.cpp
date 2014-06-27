@@ -1,13 +1,16 @@
+//TO DO:  Differentiate additional statuses ... this should be good?
+//        Count errors, reset MCU after n consecutive errors
+//        Component name and ID part of send() call ... Looks like only comp ID needed!
+
 //GroveStreams Class
 #include "GroveStreams.h"
 
-GroveStreams::GroveStreams(char* serverName, char* PROGMEM orgID, char* PROGMEM apiKey, char* PROGMEM compID, char* PROGMEM compName, int ledPin)
+GroveStreams::GroveStreams( const char* serverName, const char* PROGMEM orgID, const char* PROGMEM apiKey, const char* PROGMEM compID, int ledPin)
 {
     _serverName = serverName;
     _orgID = orgID;
     _apiKey = apiKey;
     _compID = compID;
-    _compName = compName;
     _ledPin = ledPin;
 }
 
@@ -25,51 +28,6 @@ void GroveStreams::begin(void)
 }
 
 enum gsState_t { GS_WAIT, GS_SEND, GS_RECV, GS_DISCONNECT } GS_STATE;
-
-//TO DO: differentiate additional statuses
-//connect fail -- put fail (200 OK not recd) -- timeout -- ???
-//status 0 = ok, !0 = error
-//count errors, reset MCU after n consecutive errors
-
-//request data to be sent. returns 0 if accepted.
-//returns -1 if e.g. transmission already in progress, waiting response, etc.
-ethernetStatus_t GroveStreams::send(char* data)
- {
-    if (GS_STATE == GS_WAIT) {
-        _data = data;
-        GS_STATE = GS_SEND;
-        return SEND_ACCEPTED;
-    }
-    else {
-        return SEND_BUSY;
-    }
-}
-
-ethernetStatus_t GroveStreams::_xmit(void)
-{
-    _msConnect = millis();
-    Serial << _msConnect << F(" connecting") << endl;
-    if (_ledPin >= 0) digitalWrite(_ledPin, HIGH);
-    if(client.connect(serverIP, serverPort)) {
-        _msConnected = millis();
-        Serial << _msConnected << F(" connected") << endl;
-        freeMem = freeMemory();
-        client << F("PUT /api/feed?&compId=") << _compID << F("&compName=") << _compName << F("&org=") << _orgID << "&api_key=" << _apiKey;
-        client << _data << F(" HTTP/1.1") << endl << F("Host: ") << serverIP << endl << F("Connection: close") << endl;
-        client << F("X-Forwarded-For: ") << Ethernet.localIP() << endl << F("Content-Type: application/json") << endl << endl;
-        _msPutComplete = millis();
-        Serial << _msPutComplete << F(" PUT complete ") << strlen(_data) << endl;
-        connTime = _msConnected - _msConnect;
-        return PUT_COMPLETE;
-    }
-    else {
-        _msConnected = millis();
-        connTime = _msConnected - _msConnect;
-        Serial << _msConnected << F(" connect failed") << endl;
-        if (_ledPin >= 0) digitalWrite(_ledPin, LOW);
-        return CONNECT_FAILED;
-    }
-}
 
 ethernetStatus_t GroveStreams::run(void)
 {
@@ -100,12 +58,12 @@ ethernetStatus_t GroveStreams::run(void)
         boolean httpOK = false;
 
         if(client.connected()) {
-            int nChar = client.available();
+            uint16_t nChar = client.available();
             if (nChar > 0) {
                 _msLastPacket = millis();
                 Serial << _msLastPacket << F(" received packet, len=") << nChar << endl;
                 char* b = statusBuf;
-                for (int i = 0; i < nChar; i++) {
+                for (uint16_t i = 0; i < nChar; i++) {
                     char ch = client.read();
                     Serial << _BYTE(ch);
                     if ( !haveStatus && i < sizeof(statusBuf) ) {
@@ -160,5 +118,49 @@ ethernetStatus_t GroveStreams::run(void)
         ret = DISCONNECTED;
         break;
     }
+    if (ret != NO_STATUS) lastStatus = ret;
     return ret;
+}
+
+//request data to be sent. returns 0 if accepted.
+//returns -1 if e.g. transmission already in progress, waiting response, etc.
+ethernetStatus_t GroveStreams::send(char* data)
+{
+    if (GS_STATE == GS_WAIT) {
+        _data = data;
+        GS_STATE = GS_SEND;
+        lastStatus = SEND_ACCEPTED;
+    }
+    else {
+        lastStatus = SEND_BUSY;
+    }
+    return lastStatus;
+}
+
+ethernetStatus_t GroveStreams::_xmit(void)
+{
+    _msConnect = millis();
+    Serial << _msConnect << F(" connecting") << endl;
+    if (_ledPin >= 0) digitalWrite(_ledPin, HIGH);
+    if(client.connect(serverIP, serverPort)) {
+        _msConnected = millis();
+        Serial << _msConnected << F(" connected") << endl;
+        freeMem = freeMemory();
+//        client << F("PUT /api/feed?&compId=") << _compID << F("&compName=") << _compName << F("&org=") << _orgID << "&api_key=" << _apiKey;
+        client << F("PUT /api/feed?&compId=") << _compID << F("&org=") << _orgID << "&api_key=" << _apiKey;
+        client << _data << F(" HTTP/1.1") << endl << F("Host: ") << serverIP << endl << F("Connection: close") << endl;
+        client << F("X-Forwarded-For: ") << Ethernet.localIP() << endl << F("Content-Type: application/json") << endl << endl;
+        _msPutComplete = millis();
+        Serial << _msPutComplete << F(" PUT complete ") << strlen(_data) << endl;
+        connTime = _msConnected - _msConnect;
+        lastStatus = PUT_COMPLETE;
+    }
+    else {
+        _msConnected = millis();
+        connTime = _msConnected - _msConnect;
+        Serial << _msConnected << F(" connect failed") << endl;
+        if (_ledPin >= 0) digitalWrite(_ledPin, LOW);
+        lastStatus = CONNECT_FAILED;
+    }
+    return lastStatus;
 }
