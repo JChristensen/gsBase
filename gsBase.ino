@@ -49,10 +49,9 @@ const int gmIntervals[] = { 1, 5, 10, 15, 20, 30, 60 };
 
 //object instantiations
 const char* gsServer = "grovestreams.com";
-const char* PROGMEM gsOrgID = "66d58106-8c04-34d9-9e8c-17499a8942d7";
 const char* PROGMEM gsApiKey = "cbc8d222-6f25-3e26-9f6e-edfc3364d7fd";
-const char* PROGMEM gsCompID = "Test-2";    //GMGB, GMMV
-GroveStreams GS(gsServer, gsOrgID, gsApiKey, gsCompID, WAIT_LED);
+const char* gsCompID = "Test-2";    //or GMGB, GMMV
+GroveStreams GS(gsServer, gsApiKey, gsCompID, WAIT_LED);
 
 const uint8_t maxNtpTimeouts = 3;
 ntpClass NTP(maxNtpTimeouts, NTP_LED);
@@ -285,7 +284,7 @@ void loop(void)
             if (mcusr & _BV(EXTRF)) strcat(buf, "%20EXTRF");
             if (mcusr & _BV(PORF))  strcat(buf, "%20PORF");
             msSend = millis();
-            GS.send(buf);
+            GS.send(gsCompID, buf);
             Serial << millis() << F(" NTP init") << endl;
             STATE = GS_INIT;
         }
@@ -337,7 +336,7 @@ void loop(void)
                     strcat(buf, aBuf);
                     haveCPM = false;
                 }
-                if ( GS.send(buf) == SEND_ACCEPTED ) {
+                if ( GS.send(gsCompID, buf) == SEND_ACCEPTED ) {
                     Serial << F("Post OK");
                     ++GS.success;
                 }
@@ -375,7 +374,7 @@ void loop(void)
         strcpy(buf, "&msg=Lost%20NTP%20server%20-%20reset%20MCU");
         if (millis() - msSend >= 500) {        //keep retrying if needed
             msSend = millis();
-            if (GS.send(buf) == SEND_ACCEPTED) STATE = RESET_WAIT;
+            if (GS.send(gsCompID, buf) == SEND_ACCEPTED) STATE = RESET_WAIT;
         }
         break;
 

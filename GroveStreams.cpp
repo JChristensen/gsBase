@@ -1,14 +1,13 @@
 //TO DO:  Differentiate additional statuses ... this should be good?
 //        Count errors, reset MCU after n consecutive errors
-//        Component name and ID part of send() call ... Looks like only comp ID needed!
+//        Component name and ID part of send() call ... Looks like only comp ID needed. -- DONE
 
 //GroveStreams Class
 #include "GroveStreams.h"
 
-GroveStreams::GroveStreams( const char* serverName, const char* PROGMEM orgID, const char* PROGMEM apiKey, const char* PROGMEM compID, int ledPin)
+GroveStreams::GroveStreams( const char* serverName, const char* PROGMEM apiKey, const char* PROGMEM compID, int ledPin)
 {
     _serverName = serverName;
-    _orgID = orgID;
     _apiKey = apiKey;
     _compID = compID;
     _ledPin = ledPin;
@@ -124,9 +123,10 @@ ethernetStatus_t GroveStreams::run(void)
 
 //request data to be sent. returns 0 if accepted.
 //returns -1 if e.g. transmission already in progress, waiting response, etc.
-ethernetStatus_t GroveStreams::send(char* data)
+ethernetStatus_t GroveStreams::send(const char* compID, const char* data)
 {
     if (GS_STATE == GS_WAIT) {
+        _compID = compID;
         _data = data;
         GS_STATE = GS_SEND;
         lastStatus = SEND_ACCEPTED;
@@ -146,8 +146,7 @@ ethernetStatus_t GroveStreams::_xmit(void)
         _msConnected = millis();
         Serial << _msConnected << F(" connected") << endl;
         freeMem = freeMemory();
-//        client << F("PUT /api/feed?&compId=") << _compID << F("&compName=") << _compName << F("&org=") << _orgID << "&api_key=" << _apiKey;
-        client << F("PUT /api/feed?&compId=") << _compID << F("&org=") << _orgID << "&api_key=" << _apiKey;
+        client << F("PUT /api/feed?&api_key=") << _apiKey << "&compId=" << _compID;
         client << _data << F(" HTTP/1.1") << endl << F("Host: ") << serverIP << endl << F("Connection: close") << endl;
         client << F("X-Forwarded-For: ") << Ethernet.localIP() << endl << F("Content-Type: application/json") << endl << endl;
         _msPutComplete = millis();
