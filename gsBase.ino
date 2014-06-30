@@ -1,8 +1,10 @@
 //TO DO:  Add uptime stat
 //        Diagnostic stats on/off, EEPROM parameter
-//        Base data: seq, temp, cpm, messages
+//        Base data: uptime, seq, temp, cpm, messages
 //        Diagnostic stats: success, fail, timeout, connTime, respTime, discTime, freeMem, RTC sets, sockets(?)
+//
 //        LCD stats: uptime, success, fail, timeout, memory, sockets(?)
+//        Put GroveStreams component ID in EEPROM (external?)
 
 //Set fuses: E:FD, H:D6, L:FF (preserve EEPROM thru chip erase)
 
@@ -42,6 +44,7 @@ const uint8_t GM_POWER = 22;        //geiger power enable
 //global variables
 const int txSec = 10;               //transmit data once per minute, on this second
 time_t utc, local;                  //current times
+time_t startupTime;                 //sketch start time
 uint8_t gmIntervalIdx;              //index to geiger sample interval array
 EEMEM uint8_t ee_gmIntervalIdx;     //copy persisted in EEPROM
 const uint8_t gmIntervalIdx_DEFAULT = 2;    //index to the default value (i.e. 2 -> 10 min)
@@ -72,7 +75,7 @@ Button btnUp(UP_BUTTON, PULLUP, INVERT, DEBOUNCE_MS);
 Button btnDn(DN_BUTTON, PULLUP, INVERT, DEBOUNCE_MS);
 
 const unsigned long PULSE_DUR = 50; //blink duration for the G-M one-shot LED, ms
-oneShotLED countLED;
+oneShotLED geigerLED;
 
 //Continental US Time Zones
 TimeChangeRule EDT = { "EDT", Second, Sun, Mar, 2, -240 };    //Daylight time = UTC - 4 hours
@@ -213,7 +216,7 @@ void setup(void)
     Serial << millis() << F(" RTC set the system time: ");
     printDateTime(utc);
 
-    countLED.begin(GM_PULSE_LED, PULSE_DUR);
+    geigerLED.begin(GM_PULSE_LED, PULSE_DUR);
 }
 
 enum STATE_t { NTP_INIT, GS_INIT, RUN, RESET_WARN, RESET_WAIT } STATE;
@@ -223,10 +226,10 @@ void loop(void)
 #ifdef COUNT_LOOPS
     static uint16_t loopCount;
 #endif
+    static char buf[96];
     static time_t utcLast;
     static time_t nextTransmit;          //time for next data transmission
     static time_t nextTimePrint;         //next time to print the local time to serial
-    static char buf[96];
     static uint8_t socketsAvailable;
     static int tF10;
     static unsigned int rtcSet;
@@ -238,7 +241,7 @@ void loop(void)
     btnSet.read();
     btnUp.read();
     btnDn.read();
-    countLED.run();
+    geigerLED.run();
 
     //check for data from the G-M counter
     if (GEIGER.run(&cpm, utc)) {
@@ -247,7 +250,7 @@ void loop(void)
         Serial << F("G-M counts/min ") << cpm << endl;
     }
 
-    if ( GEIGER.pulse() ) countLED.on();    //blip the LED
+    if ( GEIGER.pulse() ) geigerLED.on();    //blip the LED
 
     ntpStatus_t ntpStatus = NTP.run();      //run the NTP state machine
     if (ntpStatus == NTP_SYNC && NTP.lastSyncType == TYPE_PRECISE) {
@@ -275,6 +278,7 @@ void loop(void)
         if ( (ntpStatus == NTP_SYNC && NTP.lastSyncType == TYPE_PRECISE) || NTP.lastSyncType == TYPE_SKIPPED ) {
             nextTimePrint = nextMinute();
             nextTransmit = nextTimePrint + txSec;
+            startupTime = utc;
             //build reset message, send to GroveStreams
             strcpy(buf, "&msg=MCU%20reset%200x");
             if (mcusr < 16) strcat(buf, "0");
@@ -328,8 +332,10 @@ void loop(void)
 
             if (utc >= nextTransmit) {        //time to send data?
                 nextTransmit += 60;
-                sprintf(buf,"&a=%u&c=%i.%i&j=%u&k=%u&l=%u&m=%lu&n=%lu&p=%lu&q=%u&r=%u", GS.seq, tF10/10, tF10%10, GS.success, GS.fail, GS.timeout, GS.connTime, GS.respTime, GS.discTime, GS.freeMem, rtcSet);
-                if (haveCPM) {                //have a reading from the gm counter, add it on
+                char upBuf[12];
+                timeSpan(upBuf, utc - startupTime);
+                sprintf(buf,"&u=%s&a=%u&c=%i.%i&j=%u&k=%u&l=%u&m=%lu&n=%lu&p=%lu&q=%u&r=%u", upBuf, GS.seq, tF10/10, tF10%10, GS.success, GS.fail, GS.timeout, GS.connTime, GS.respTime, GS.discTime, GS.freeMem, rtcSet);
+                if (haveCPM) {                //have a reading from the g-m counter, add it on
                     char aBuf[8];
                     itoa(cpm, aBuf, 10);
                     strcat(buf, "&b=");
@@ -356,7 +362,8 @@ void loop(void)
             }
 
             if (utc >= nextTimePrint) {             //print time to Serial once per minute
-                Serial << endl << millis() << F(" Local: ");
+                timeSpan(buf, utc - startupTime);
+                Serial << endl << millis() << F(" Uptime: ") << buf << F(" Local: ");
                 printDateTime(local);
                 nextTimePrint += 60;
                 //renew the DHCP lease hourly
@@ -371,9 +378,9 @@ void loop(void)
         break;
 
     case RESET_WARN:
-        strcpy(buf, "&msg=Lost%20NTP%20server%20-%20reset%20MCU");
         if (millis() - msSend >= 500) {        //keep retrying if needed
             msSend = millis();
+            strcpy(buf, "&msg=Lost%20NTP%20server%20-%20reset%20MCU");
             if (GS.send(gsCompID, buf) == SEND_ACCEPTED) STATE = RESET_WAIT;
         }
         break;

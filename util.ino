@@ -72,3 +72,12 @@ time_t nextMinute()
     tm.Second = 0;
     return makeTime(tm) + 60;
 }
+
+//given an epoch time (or a time span), returns a character string
+//to the caller's buffer in the form nnnnnd.nnh:nnm.
+//max string length is 12 characters including the null terminator.
+void timeSpan(char* buf, time_t span)
+{
+    sprintf( buf, "%lu.%02i:%02i", span / SECS_PER_DAY, hour(span), minute(span) );
+}
+
