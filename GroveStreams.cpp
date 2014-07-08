@@ -5,14 +5,15 @@
 //GroveStreams Class
 #include "GroveStreams.h"
 
-GroveStreams::GroveStreams( const char* serverName, const char* PROGMEM apiKey, const char* PROGMEM compID, int ledPin)
+//Constructor
+GroveStreams::GroveStreams( const char* serverName, const char* PROGMEM apiKey, int ledPin)
 {
     _serverName = serverName;
     _apiKey = apiKey;
-    _compID = compID;
     _ledPin = ledPin;
 }
 
+//Initialize GroveStreams
 void GroveStreams::begin(void)
 {
     int ret = dnsLookup(_serverName, serverIP);
@@ -28,6 +29,7 @@ void GroveStreams::begin(void)
 
 enum gsState_t { GS_WAIT, GS_SEND, GS_RECV, GS_DISCONNECT } GS_STATE;
 
+//GroveStreams state machine
 ethernetStatus_t GroveStreams::run(void)
 {
     ethernetStatus_t ret = NO_STATUS;
@@ -137,6 +139,7 @@ ethernetStatus_t GroveStreams::send(const char* compID, const char* data)
     return lastStatus;
 }
 
+//Send data to GroveStreams
 ethernetStatus_t GroveStreams::_xmit(void)
 {
     _msConnect = millis();

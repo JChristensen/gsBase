@@ -26,7 +26,7 @@ const unsigned long RECEIVE_TIMEOUT = 10000;    //ms to wait for response from s
 class GroveStreams
 {
     public:
-        GroveStreams( const char* serverName, const char* PROGMEM apiKey, const char* PROGMEM compID, int ledPin = -1);
+        GroveStreams( const char* serverName, const char* PROGMEM apiKey, int ledPin = -1);
         void begin(void);
         ethernetStatus_t send(const char* compID, const char* data);
         ethernetStatus_t run(void);

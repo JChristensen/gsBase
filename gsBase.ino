@@ -17,6 +17,7 @@
 #include <Button.h>                 //http://github.com/JChristensen/Button
 #include <DS3232RTC.h>              //http://github.com/JChristensen/DS3232RTC
 #include <Ethernet.h>               //http://arduino.cc/en/Reference/Ethernet
+#include <extEEPROM.h>
 #include <LiquidTWI.h>              //http://forums.adafruit.com/viewtopic.php?f=19&t=21586&p=113177
 #include <MCP980X.h>                //http://github.com/JChristensen/MCP980X
 #include <MemoryFree.h>             //http://playground.arduino.cc/Code/AvailableMemory
@@ -57,19 +58,17 @@ const int gmIntervals[] = { 1, 5, 10, 15, 20, 30, 60 };
 //object instantiations
 const char* gsServer = "grovestreams.com";
 const char* PROGMEM gsApiKey = "cbc8d222-6f25-3e26-9f6e-edfc3364d7fd";
-const char* gsCompID = "Test-2";    //or GMGB, GMMV
-GroveStreams GS(gsServer, gsApiKey, gsCompID, WAIT_LED);
+char gsCompID[9];                                //read from external EEPROM
+GroveStreams GS(gsServer, gsApiKey, WAIT_LED);
 
 const uint8_t maxNtpTimeouts = 3;
 ntpClass NTP(maxNtpTimeouts, NTP_LED);
 
 EthernetClient client;
-
 MCP980X mcp9802(0);
-
 movingAvg avgTemp;
-
 LiquidTWI lcd(0); //i2c address 0 (0x20)
+extEEPROM eep(kbits_2, 1, 8);
 
 const bool PULLUP = true;
 const bool INVERT = true;
@@ -153,10 +152,11 @@ void setup(void)
     //device inits
     delay(1);
     digitalWrite(WIZ_RESET, HIGH);
+    eep.begin();
     mcp9802.begin();
-    mcp9802.writeConfig(ADC_RES_12BITS);
     lcd.begin(16, 2);
-    TWBR = 12;            //400kHz
+    TWBR = 12;                              //400kHz
+    mcp9802.writeConfig(ADC_RES_12BITS);
     lcd.clear();
     lcd.setBacklight(HIGH);
 
@@ -175,7 +175,7 @@ void setup(void)
     lcd.clear();
     lcd << F("MAC address:");
     lcd.setCursor(0, 1);
-    getMAC(mac);
+    eep.read(0xFA, mac, 6);
     for (int i=0; i<6; ++i) {
         if (mac[i] < 16) lcd << '0';
         lcd << _HEX( mac[i] );
@@ -200,6 +200,7 @@ void setup(void)
     delay(1000);
 
     //connect to GroveStreams, display IP
+    eep.read(0, (uint8_t*)gsCompID, 9);      //get the component ID from EEPROM
     GS.begin();
     lcd.clear();
     lcd << F("GroveStreams IP:");
