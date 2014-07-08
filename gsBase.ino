@@ -5,6 +5,10 @@
 //
 //        LCD stats: uptime, success, fail, timeout, memory, sockets(?)
 //        Put GroveStreams component ID in EEPROM (external?)
+//
+//        SOMEONE (mainline code or GS class) needs to count errors returned by GS.run() -- e.g. CONNECT_FAILED status is not being tracked anywhere.
+//
+//        Store GroveStreams component ID in external EEPROM.
 
 //Set fuses: E:FD, H:D6, L:FF (preserve EEPROM thru chip erase)
 
@@ -230,7 +234,6 @@ void loop(void)
     static time_t utcLast;
     static time_t nextTransmit;          //time for next data transmission
     static time_t nextTimePrint;         //next time to print the local time to serial
-    static uint8_t socketsAvailable;
     static int tF10;
     static unsigned int rtcSet;
     static int cpm;
@@ -333,7 +336,7 @@ void loop(void)
             if (utc >= nextTransmit) {        //time to send data?
                 nextTransmit += 60;
                 char upBuf[12];
-                timeSpan(upBuf, utc - startupTime);
+                timeSpan(upBuf, utc - startupTime);    //uptime to send to GS
                 sprintf(buf,"&u=%s&a=%u&c=%i.%i&j=%u&k=%u&l=%u&m=%lu&n=%lu&p=%lu&q=%u&r=%u", upBuf, GS.seq, tF10/10, tF10%10, GS.success, GS.fail, GS.timeout, GS.connTime, GS.respTime, GS.discTime, GS.freeMem, rtcSet);
                 if (haveCPM) {                //have a reading from the g-m counter, add it on
                     char aBuf[8];
@@ -363,8 +366,9 @@ void loop(void)
 
             if (utc >= nextTimePrint) {             //print time to Serial once per minute
                 timeSpan(buf, utc - startupTime);
-                Serial << endl << millis() << F(" Uptime: ") << buf << F(" Local: ");
-                printDateTime(local);
+                Serial << endl << millis() << F(" Local: ");
+                printDateTime(Serial, local);
+                Serial << F(" Uptime: ") << buf << endl;
                 nextTimePrint += 60;
                 //renew the DHCP lease hourly
                 if (utcM == 0 && utcS == 0) {
@@ -373,6 +377,8 @@ void loop(void)
                     unsigned long msEnd = millis();
                     Serial << msEnd << ' ' << F("Ethernet.maintain=") << mStat << ' ' << msEnd - msStart << endl;
                 }
+                uint8_t nSock = showSockStatus();
+                Serial << F("Sockets available: ") << nSock << endl;
             }
         }
         break;
