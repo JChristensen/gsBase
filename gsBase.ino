@@ -4,11 +4,16 @@
 //        Diagnostic stats: success, fail, timeout, connTime, respTime, discTime, freeMem, RTC sets, sockets(?)
 //
 //        LCD stats: uptime, success, fail, timeout, memory, sockets(?)
-//        Put GroveStreams component ID in EEPROM (external?)
 //
 //        SOMEONE (mainline code or GS class) needs to count errors returned by GS.run() -- e.g. CONNECT_FAILED status is not being tracked anywhere.
 //
-//        Store GroveStreams component ID in external EEPROM.
+//        Check return from Ethernet.begin() (int, 1=success, 0=fail)
+//        Check return from Ethernet.maintain() (byte, 1 or 3 = fail, 0, 2, 4 = success)
+//        Test Ethernet.begin() for failure
+//
+//  xx    Store GroveStreams component ID in external EEPROM. xxDONExx
+//
+//  xx     Buffer http traffic to reduce number of packets sent. Current PUT text is ~250 chars.
 
 //Set fuses: E:FD, H:D6, L:FF (preserve EEPROM thru chip erase)
 
@@ -57,9 +62,9 @@ const int gmIntervals[] = { 1, 5, 10, 15, 20, 30, 60 };
 
 //object instantiations
 const char* gsServer = "grovestreams.com";
-const char* PROGMEM gsApiKey = "cbc8d222-6f25-3e26-9f6e-edfc3364d7fd";
+PROGMEM const char gsApiKey[] = "cbc8d222-6f25-3e26-9f6e-edfc3364d7fd";
 char gsCompID[9];                                //read from external EEPROM
-GroveStreams GS(gsServer, gsApiKey, WAIT_LED);
+GroveStreams GS(gsServer, (const __FlashStringHelper *) gsApiKey, WAIT_LED);
 
 const uint8_t maxNtpTimeouts = 3;
 ntpClass NTP(maxNtpTimeouts, NTP_LED);
@@ -121,7 +126,6 @@ void setup(void)
     pinMode(RTC_1HZ, INPUT_PULLUP);
     pinMode(WIZ_RESET, OUTPUT);
     pinMode(HB_LED, OUTPUT);
-    pinMode(NTP_LED, OUTPUT);
     pinMode(WAIT_LED, OUTPUT);
     pinMode(GM_INPUT, INPUT_PULLUP);
 
@@ -152,10 +156,9 @@ void setup(void)
     //device inits
     delay(1);
     digitalWrite(WIZ_RESET, HIGH);
-    eep.begin();
     mcp9802.begin();
     lcd.begin(16, 2);
-    TWBR = 12;                              //400kHz
+    eep.begin(twiClock400kHz);
     mcp9802.writeConfig(ADC_RES_12BITS);
     lcd.clear();
     lcd.setBacklight(HIGH);
@@ -307,8 +310,7 @@ void loop(void)
         }
         else if ( millis() - msSend >= 10000 ) {
             Serial << millis() << F(" GroveStreams send fail, resetting MCU") << endl;
-            wdt_enable(WDTO_4S);
-            while (1);
+            mcuReset();
         }
         break;
 
@@ -378,8 +380,8 @@ void loop(void)
                     unsigned long msEnd = millis();
                     Serial << msEnd << ' ' << F("Ethernet.maintain=") << mStat << ' ' << msEnd - msStart << endl;
                 }
-                uint8_t nSock = showSockStatus();
-                Serial << F("Sockets available: ") << nSock << endl;
+//                uint8_t nSock = showSockStatus();
+//                Serial << F("Sockets available: ") << nSock << endl;
             }
         }
         break;
@@ -507,27 +509,24 @@ byte socketStat[MAX_SOCK_NUM];
 uint8_t showSockStatus()
 {
     uint8_t nAvailable = 0;
-
-    for (int i = 0; i < MAX_SOCK_NUM; i++) {
-        Serial.print(F("Socket#"));
-        Serial.print(i);
+    
+//    uint16_t rtr = W5100.readRTR();    //retry time
+//    uint8_t rcr = W5100.readRCR();     //retry count
+//    Serial << F("RTR=") << rtr << F(" RCR=") << rcr << endl;
+    
+    for (uint8_t i = 0; i < MAX_SOCK_NUM; i++) {
+        Serial << F("Sock_") << i;
         uint8_t s = W5100.readSnSR(i);
         socketStat[i] = s;
         if ( s == 0 ) ++nAvailable;
-        Serial.print(F(":0x"));
-        Serial.print(s,16);
-        Serial.print(F(" "));
-        Serial.print(W5100.readSnPORT(i));
-        Serial.print(F(" D:"));
+        Serial << F(" 0x") << _HEX(s) << ' ' << W5100.readSnPORT(i) << F(" D:");
         uint8_t dip[4];
         W5100.readSnDIPR(i, dip);
-        for (int j=0; j<4; j++) {
-            Serial.print(dip[j],10);
-            if (j<3) Serial.print(".");
+        for (uint8_t j = 0; j < 4; j++) {
+            Serial << dip[j];
+            if (j < 3) Serial << '.';
         }
-        Serial.print(F("("));
-        Serial.print(W5100.readSnDPORT(i));
-        Serial.println(F(")"));
+        Serial << '(' << W5100.readSnDPORT(i) << ')' << endl;
     }
     return nAvailable;
 }

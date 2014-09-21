@@ -26,10 +26,11 @@ const unsigned long RECEIVE_TIMEOUT = 10000;    //ms to wait for response from s
 class GroveStreams
 {
     public:
-        GroveStreams( const char* serverName, const char* PROGMEM apiKey, int ledPin = -1);
+        GroveStreams(const char* serverName, const __FlashStringHelper* apiKey, int ledPin = -1);
         void begin(void);
         ethernetStatus_t send(const char* compID, const char* data);
         ethernetStatus_t run(void);
+        void ipToText(char* dest, IPAddress ip);
 
         IPAddress serverIP;
         ethernetStatus_t lastStatus;
@@ -46,8 +47,10 @@ class GroveStreams
 
     private:
         ethernetStatus_t _xmit(void);
+        char _localIP[16];
+        char _groveStreamsIP[16];
         const char* _serverName;
-        const char* PROGMEM _apiKey;
+        const __FlashStringHelper* _apiKey;
         const char* _compID;                //component ID
         const char* _data;
         unsigned long _msConnect;
@@ -59,6 +62,21 @@ class GroveStreams
 
         int _ledPin;
 
+};
+
+const uint16_t PKTSIZE = 300;
+class ethernetPacket
+{
+    public:
+        ethernetPacket(void);
+        void putChar(const char* c);
+        void putChar(const __FlashStringHelper *f);
+        void flush(void);
+        
+    private:
+        char _buf[PKTSIZE];     //the packet
+        uint16_t _nchar;        //number of characters in the packet
+        char* _next;            //pointer to the next available position in the packet
 };
 
 #endif

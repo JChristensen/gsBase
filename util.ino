@@ -58,7 +58,7 @@ time_t nextMinute()
 }
 
 //given an epoch time (or a time span), returns a character string
-//to the caller's buffer in the form nnnnnd.nnh:nnm.
+//to the caller's buffer in the form ddddd.hh:mm.
 //max string length is 12 characters including the null terminator.
 void timeSpan(char* buf, time_t span)
 {
