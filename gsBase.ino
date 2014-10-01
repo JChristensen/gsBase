@@ -6,6 +6,8 @@
 //        LCD stats: uptime, success, fail, timeout, memory, sockets(?)
 //
 //        SOMEONE (mainline code or GS class) needs to count errors returned by GS.run() -- e.g. CONNECT_FAILED status is not being tracked anywhere.
+//        Failures when calling GS.send() are tracked in gsBase.ino in GS.fail, not sure about this.
+//        Probably the GS class needs to track these stats at least mostly.
 //
 //        Check return from Ethernet.begin() (int, 1=success, 0=fail)
 //        Check return from Ethernet.maintain() (byte, 1 or 3 = fail, 0, 2, 4 = success)
@@ -22,7 +24,7 @@
 #include <Button.h>                 //http://github.com/JChristensen/Button
 #include <DS3232RTC.h>              //http://github.com/JChristensen/DS3232RTC
 #include <Ethernet.h>               //http://arduino.cc/en/Reference/Ethernet
-#include <extEEPROM.h>
+#include <extEEPROM.h>              //http://github.com/JChristensen/extEEPROM
 #include <LiquidTWI.h>              //http://forums.adafruit.com/viewtopic.php?f=19&t=21586&p=113177
 #include <MCP980X.h>                //http://github.com/JChristensen/MCP980X
 #include <MemoryFree.h>             //http://playground.arduino.cc/Code/AvailableMemory
@@ -57,8 +59,10 @@ time_t utc, local;                  //current times
 time_t startupTime;                 //sketch start time
 uint8_t gmIntervalIdx;              //index to geiger sample interval array
 EEMEM uint8_t ee_gmIntervalIdx;     //copy persisted in EEPROM
-const uint8_t gmIntervalIdx_DEFAULT = 2;    //index to the default value (i.e. 2 -> 10 min)
+const uint8_t gmIntervalIdx_DEFAULT = 3;    //index to the default value (i.e. 3 -> 15 min)
 const int gmIntervals[] = { 1, 5, 10, 15, 20, 30, 60 };
+bool wdtEnable;                     //wdt enable flag
+EEMEM uint8_t ee_wdtEnable;            //copy persisted in EEPROM
 
 //object instantiations
 const char* gsServer = "grovestreams.com";
@@ -153,6 +157,13 @@ void setup(void)
     }
     tz = timezones[tzIndex];                //set the tz
 
+    //and wdt flag (debug)
+    wdtEnable = eeprom_read_byte( &ee_wdtEnable );
+    if ( tzIndex >= sizeof(tzNames) / sizeof(tzNames[0]) ) {
+        tzIndex = 0;
+        eeprom_write_byte( &ee_tzIndex, tzIndex);
+    }
+
     //device inits
     delay(1);
     digitalWrite(WIZ_RESET, HIGH);
@@ -176,7 +187,7 @@ void setup(void)
     //get MAC address & display
     uint8_t mac[6];
     lcd.clear();
-    lcd << F("MAC address:");
+    lcd << F("MAC address");
     lcd.setCursor(0, 1);
     eep.read(0xFA, mac, 6);
     for (int i=0; i<6; ++i) {
@@ -187,9 +198,9 @@ void setup(void)
 
     //start Ethernet, display IP
     Ethernet.begin(mac);                   //DHCP
-    Serial << millis() << F(" Ethernet started, IP=") << Ethernet.localIP() << endl;
+    Serial << millis() << F(" Ethernet started ") << Ethernet.localIP() << endl;
     lcd.clear();
-    lcd << F("Ethernet IP:");
+    lcd << F("IP Address");
     lcd.setCursor(0, 1);
     lcd << Ethernet.localIP();
     delay(1000);
@@ -197,7 +208,7 @@ void setup(void)
     //start NTP, display server IP
     NTP.begin();
     lcd.clear();
-    lcd << F("NTP Server IP:");
+    lcd << F("NTP Server");
     lcd.setCursor(0, 1);
     lcd << NTP.serverIP;
     delay(1000);
@@ -206,7 +217,7 @@ void setup(void)
     eep.read(0, (uint8_t*)gsCompID, 9);      //get the component ID from EEPROM
     GS.begin();
     lcd.clear();
-    lcd << F("GroveStreams IP:");
+    lcd << F("GroveStreams");
     lcd.setCursor(0, 1);
     lcd << GS.serverIP;
     delay(1000);
@@ -305,7 +316,8 @@ void loop(void)
         if (gsStatus == HTTP_OK) {
             Serial << millis() << F(" GS init") << endl;
             GEIGER.begin(gmIntervals[gmIntervalIdx], GM_POWER, utc);
-            wdt_enable(WDTO_8S);
+            if (wdtEnable) wdt_enable(WDTO_8S);
+            Serial << millis() << F(" Watchdog Timer ") << (wdtEnable ? F("ON") : F("OFF")) << endl;
             STATE = RUN;
         }
         else if ( millis() - msSend >= 10000 ) {
@@ -373,6 +385,8 @@ void loop(void)
                 printDateTime(Serial, local);
                 Serial << F(" Uptime: ") << buf << endl;
                 nextTimePrint += 60;
+                uint8_t nSock = showSockStatus();
+                Serial << F("Sockets available: ") << nSock << endl;
                 //renew the DHCP lease hourly
                 if (utcM == 0 && utcS == 0) {
                     unsigned long msStart = millis();
@@ -380,8 +394,6 @@ void loop(void)
                     unsigned long msEnd = millis();
                     Serial << msEnd << ' ' << F("Ethernet.maintain=") << mStat << ' ' << msEnd - msStart << endl;
                 }
-//                uint8_t nSock = showSockStatus();
-//                Serial << F("Sockets available: ") << nSock << endl;
             }
         }
         break;
@@ -400,7 +412,7 @@ void loop(void)
     }
 }
 
-enum dispStates_t { DISP_CLOCK, SET_TZ, SET_INTERVAL } DISP_STATE;
+enum dispStates_t { DISP_CLOCK, SET_TZ, SET_INTERVAL, SET_WDT } DISP_STATE;
 
 //user interface, display and buttons
 void runDisplay(int tF10, int cpm)
@@ -465,10 +477,13 @@ void runDisplay(int tF10, int cpm)
 
     case SET_INTERVAL:
         if (btnSet.wasReleased()) {
-            DISP_STATE = DISP_CLOCK;
-            lcd.clear();
+            DISP_STATE = SET_WDT;
             GEIGER.setInterval( gmIntervals[gmIntervalIdx] );
-            eeprom_update_byte(  &ee_gmIntervalIdx, gmIntervalIdx );
+            eeprom_update_byte( &ee_gmIntervalIdx, gmIntervalIdx );
+            lcd.clear();
+            lcd << F("Watchdog timer:");
+            lcd.setCursor(0, 1);
+            lcd << (wdtEnable ? F("ON") : F("OFF"));
         }
         else if (btnUp.wasPressed()) {
             if ( ++gmIntervalIdx >= sizeof(gmIntervals) / sizeof(gmIntervals[0]) ) gmIntervalIdx = 0;
@@ -481,6 +496,27 @@ void runDisplay(int tF10, int cpm)
             lcd << gmIntervals[gmIntervalIdx] << F(" minute") << ( (gmIntervals[gmIntervalIdx] > 1) ? "s  " : "   ");
         }
         break;
+
+    case SET_WDT:
+        if (btnSet.wasReleased()) {
+            DISP_STATE = DISP_CLOCK;
+            lcd.clear();
+            eeprom_update_byte( &ee_wdtEnable, wdtEnable );
+            Serial << millis() << F(" Watchdog Timer ") << (wdtEnable ? F("ON") : F("OFF")) << endl;
+            if (wdtEnable) {
+                wdt_enable(WDTO_8S);
+            }
+            else {
+                wdt_disable();
+            }
+        }
+        else if ( btnUp.wasPressed() || btnDn.wasPressed() ) {
+            wdtEnable = !wdtEnable;
+            lcd.setCursor(0, 1);
+            lcd << (wdtEnable ? F("ON ") : F("OFF"));
+        }
+        break;
+
     }
 }
 

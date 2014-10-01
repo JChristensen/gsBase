@@ -18,7 +18,7 @@ void GroveStreams::begin(void)
 {
     int ret = dnsLookup(_serverName, serverIP);
     if (ret == 1) {
-        Serial << millis() << F(" GroveStreams IP=") << serverIP << endl;
+        Serial << millis() << F(" GroveStreams ") << serverIP << endl;
     }
     else {
         Serial << millis() << F(" GS DNS lookup fail, ret=") << ret << endl;
@@ -146,7 +146,7 @@ ethernetStatus_t GroveStreams::_xmit(void)
     ethernetPacket packet;
     
     _msConnect = millis();
-    Serial << _msConnect << F(" connecting") << endl;
+    Serial << _msConnect << F(" connecting") << F(" WDTCSR=0x") << _HEX(WDTCSR) << endl;
     if (_ledPin >= 0) digitalWrite(_ledPin, HIGH);
     if ( client.connect(serverIP, serverPort) ) {
         _msConnected = millis();
