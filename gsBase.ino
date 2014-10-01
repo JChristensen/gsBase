@@ -158,11 +158,8 @@ void setup(void)
     tz = timezones[tzIndex];                //set the tz
 
     //and wdt flag (debug)
-    wdtEnable = eeprom_read_byte( &ee_wdtEnable );
-    if ( tzIndex >= sizeof(tzNames) / sizeof(tzNames[0]) ) {
-        tzIndex = 0;
-        eeprom_write_byte( &ee_tzIndex, tzIndex);
-    }
+//    wdtEnable = eeprom_read_byte( &ee_wdtEnable );
+    wdtEnable = true;
 
     //device inits
     delay(1);
