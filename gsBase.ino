@@ -13,6 +13,9 @@
 //        Check return from Ethernet.maintain() (byte, 1 or 3 = fail, 0, 2, 4 = success)
 //        Test Ethernet.begin() for failure
 //
+//        In the state machine, can NTP_INIT and GS_INIT be interchanged? This would prevent
+//        a lot of fairly frequent NTP requests if GS is down.
+//
 //  xx    Store GroveStreams component ID in external EEPROM. xxDONExx
 //
 //  xx     Buffer http traffic to reduce number of packets sent. Current PUT text is ~250 chars.
@@ -70,7 +73,7 @@ PROGMEM const char gsApiKey[] = "cbc8d222-6f25-3e26-9f6e-edfc3364d7fd";
 char gsCompID[9];                                //read from external EEPROM
 GroveStreams GS(gsServer, (const __FlashStringHelper *) gsApiKey, WAIT_LED);
 
-const uint8_t maxNtpTimeouts = 3;
+const uint8_t maxNtpTimeouts = 5;
 ntpClass NTP(maxNtpTimeouts, NTP_LED);
 
 EthernetClient client;
@@ -158,8 +161,7 @@ void setup(void)
     tz = timezones[tzIndex];                //set the tz
 
     //and wdt flag (debug)
-//    wdtEnable = eeprom_read_byte( &ee_wdtEnable );
-    wdtEnable = true;
+    wdtEnable = eeprom_read_byte( &ee_wdtEnable );
 
     //device inits
     delay(1);
@@ -334,7 +336,7 @@ void loop(void)
         //            Serial << millis() << F(" NTP Sync in 5 seconds") << endl;
         //        }
 
-        if (utc != utcLast) {                 //once-per-second processing
+        if ( utc != utcLast ) {               //once-per-second processing
             utcLast = utc;
             uint8_t utcM = minute(utc);
             uint8_t utcS = second(utc);
@@ -382,8 +384,8 @@ void loop(void)
                 printDateTime(Serial, local);
                 Serial << F(" Uptime: ") << buf << endl;
                 nextTimePrint += 60;
-                uint8_t nSock = showSockStatus();
-                Serial << F("Sockets available: ") << nSock << endl;
+//                uint8_t nSock = showSockStatus();
+//                Serial << F("Sockets available: ") << nSock << endl;
                 //renew the DHCP lease hourly
                 if (utcM == 0 && utcS == 0) {
                     unsigned long msStart = millis();
@@ -517,8 +519,6 @@ void runDisplay(int tF10, int cpm)
     }
 }
 
-byte socketStat[MAX_SOCK_NUM];
-
 //status values
 //class SnSR {
 //public:
@@ -541,6 +541,7 @@ byte socketStat[MAX_SOCK_NUM];
 
 uint8_t showSockStatus()
 {
+    uint8_t socketStat[MAX_SOCK_NUM];
     uint8_t nAvailable = 0;
     
 //    uint16_t rtr = W5100.readRTR();    //retry time
