@@ -7,7 +7,8 @@
 #include <Time.h>
 #include <Streaming.h>    //http://arduiniana.org/libraries/streaming/
 
-void timeStamp(Print& p, time_t t);
+//void timeStamp(Print& p, time_t t);
+extern const char* tzUTC;
 
 volatile bool _pulse;             //ISR pulse flag
 volatile int _count;              //ISR pulse count
@@ -76,26 +77,25 @@ bool geiger::run(int* count, time_t utc)
             digitalWrite(_powerPin, LOW);   //if interval is changed while collect is in progress, it gets aborted, so ensure the power is turned off here
             _nextSampleTime = utc + _sampleInterval - utc % _sampleInterval;    //next "neat" time
             if (_nextSampleTime - utc < WARMUP_TIME) _nextSampleTime += _sampleInterval;    //make sure not too soon
-            timeStamp(Serial, utc);
-            Serial << F("G-M wait, next sample: ");
-            timeStamp(Serial, _nextSampleTime);
-            Serial << endl;
+            printDateTime(utc, tzUTC, false);
+            Serial << F(" G-M wait, next sample: ");
+            printDateTime(_nextSampleTime, tzUTC);
             break;
     
         case gmWAIT:
             if (utc >= _nextSampleTime - WARMUP_TIME) {
                 gmState = gmWARMUP;
                 digitalWrite(_powerPin, HIGH);
-                timeStamp(Serial, utc);
-                Serial << F("G-M warmup, power on") << endl;
+                printDateTime(utc, tzUTC, false);
+                Serial << F(" G-M warmup, power on\n");
             }
             break;
     
         case gmWARMUP:
             if (utc >= _nextSampleTime) {
                 gmState = _continuous ? gmCONTINUOUS : gmCOLLECT;
-                timeStamp(Serial, utc);
-                Serial << F("G-M collect") << endl;
+                printDateTime(utc, tzUTC, false);
+                Serial << F(" G-M collect") << endl;
                 ATOMIC_BLOCK(ATOMIC_RESTORESTATE) {
                     _count = 0;
                     _pulse = false;
@@ -114,11 +114,9 @@ bool geiger::run(int* count, time_t utc)
                     _pulse = false;
                 }
                 _nextSampleTime += _sampleInterval;
-                timeStamp(Serial, utc);
-    //            Serial << F("G-M wait") << endl;
-                Serial << F("G-M wait, next sample: ");
-                timeStamp(Serial, _nextSampleTime);
-                Serial << endl;
+                printDateTime(utc, tzUTC, false);
+                Serial << F(" G-M wait, next sample: ");
+                printDateTime(_nextSampleTime, tzUTC);
                 gmState = gmWAIT;
                 digitalWrite(_powerPin, LOW);
                 ret = true;
@@ -133,10 +131,9 @@ bool geiger::run(int* count, time_t utc)
                     _pulse = false;
                 }
                 _nextSampleTime += _sampleInterval;
-                timeStamp(Serial, utc);
-                Serial << F("G-M continuous, next sample: ");
-                timeStamp(Serial, _nextSampleTime);
-                Serial << endl;
+                printDateTime(utc, tzUTC, false);
+                Serial << F(" G-M continuous, next sample: ");
+                printDateTime(_nextSampleTime, tzUTC);
                 ret = true;
             }
             break;

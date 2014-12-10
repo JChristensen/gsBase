@@ -113,6 +113,7 @@ Timezone* tz;                       //pointer to the time zone
 uint8_t tzIndex;                    //index to the timezones[] array and the tzNames[] array
 EEMEM uint8_t ee_tzIndex;           //copy persisted in EEPROM
 TimeChangeRule* tcr;                //pointer to the time change rule, use to get TZ abbrev
+extern const char* tzUTC;
 
 //trap the MCUSR value after reset to determine the reset source
 //and ensure the watchdog is reset. this code does not work with a bootloader.
@@ -232,7 +233,7 @@ void setup(void)
     utc = RTC.get();
     NTP.setTime(utc);
     Serial << millis() << F(" RTC set the system time: ");
-    printDateTime(utc);
+    printDateTime(utc, tzUTC);
 
     geigerLED.begin(GM_PULSE_LED, PULSE_DUR);
 }
@@ -263,8 +264,8 @@ void loop(void)
     //check for data from the G-M counter
     if (GEIGER.run(&cpm, utc)) {
         haveCPM = true;
-        timeStamp(Serial, utc);
-        Serial << F("G-M counts/min ") << cpm << endl;
+        printDateTime(utc, tzUTC, false);
+        Serial << F(" G-M counts/min ") << cpm << endl;
     }
 
     if ( GEIGER.pulse() ) geigerLED.on();    //blip the LED
@@ -276,7 +277,7 @@ void loop(void)
         RTC.set(utc + 1);
         RTC.squareWave(SQWAVE_1_HZ);
         Serial << millis() << F(" NTP set the RTC: ");
-        printDateTime(utc);
+        printDateTime(utc, tzUTC);
         ++rtcSet;
     }
     else if (ntpStatus == NTP_RESET) {
@@ -381,7 +382,7 @@ void loop(void)
             if (utc >= nextTimePrint) {             //print time to Serial once per minute
                 timeSpan(buf, utc - startupTime);
                 Serial << endl << millis() << F(" Local: ");
-                printDateTime(Serial, local);
+                printDateTime(local, tcr -> abbrev, false);
                 Serial << F(" Uptime: ") << buf << endl;
                 nextTimePrint += 60;
 //                uint8_t nSock = showSockStatus();
