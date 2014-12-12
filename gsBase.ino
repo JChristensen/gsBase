@@ -38,7 +38,7 @@
 #include <Time.h>                   //http://www.arduino.cc/playground/Code/Time
 #include <Timezone.h>               //http://github.com/JChristensen/Timezone
 #include <Wire.h>                   //http://arduino.cc/en/Reference/Wire
-#include "GroveStreams.h"           //part of this project
+#include <GroveStreams.h>
 #include "classes.h"                //part of this project
 
 //#define COUNT_LOOPS                 //count RUN state loops/sec

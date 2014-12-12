@@ -40,13 +40,6 @@ void printI00(Print& p, int val, char delim)
     return;
 }
 
-//void timeStamp(Print& p, time_t t)
-//{
-//    printTime(p, t);
-//    printI00(p, day(t), 0);
-//    Serial << monthShortStr(month(t)) << year(t) << ' ';
-//}
-
 //calculate the next time where seconds = 0
 time_t nextMinute()
 {

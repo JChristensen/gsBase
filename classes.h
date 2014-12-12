@@ -1,4 +1,4 @@
-//TO DO: Is timeStamp() a redundant function?
+//TO DO: Is timeStamp() a redundant function? -- yes, removed.
 
 // geiger and oneShotLED classes
 
