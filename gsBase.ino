@@ -38,8 +38,10 @@
 #include <Time.h>                   //http://www.arduino.cc/playground/Code/Time
 #include <Timezone.h>               //http://github.com/JChristensen/Timezone
 #include <Wire.h>                   //http://arduino.cc/en/Reference/Wire
-#include <GroveStreams.h>
+#include <XBee.h>                   //http://code.google.com/p/xbee-arduino/
+#include <GroveStreams.h>           //http://github.com/JChristensen/Timezone
 #include "classes.h"                //part of this project
+#include "xbee.h"                   //part of this project
 
 //#define COUNT_LOOPS                 //count RUN state loops/sec
 
@@ -91,6 +93,8 @@ Button btnDn(DN_BUTTON, PULLUP, INVERT, DEBOUNCE_MS);
 
 const unsigned long PULSE_DUR = 50; //blink duration for the G-M one-shot LED, ms
 oneShotLED geigerLED;
+
+baseXBee xb;
 
 //Continental US Time Zones
 TimeChangeRule EDT = { "EDT", Second, Sun, Mar, 2, -240 };    //Daylight time = UTC - 4 hours
@@ -256,6 +260,20 @@ void loop(void)
 
     wdt_reset();
     utc = NTP.now();
+    if (xb.read() == RX_DATA) {
+        Serial << millis() << F(" XB RX ") << xb.payload << endl;
+        if ( STATE == RUN ) {
+            if ( GS.send(xb.rxNodeID, &xb.payload[5]) == SEND_ACCEPTED ) {
+                Serial << F("Post OK\n");
+            }
+            else {
+                Serial << F("Post FAIL\n");
+            }
+        }
+        else {
+            Serial << F("...ignored\n");
+        }
+    }
     btnSet.read();
     btnUp.read();
     btnDn.read();
@@ -339,6 +357,7 @@ void loop(void)
 
         if ( utc != utcLast ) {               //once-per-second processing
             utcLast = utc;
+            xb.sendTimeSync(utc);
             uint8_t utcM = minute(utc);
             uint8_t utcS = second(utc);
 #ifdef COUNT_LOOPS
