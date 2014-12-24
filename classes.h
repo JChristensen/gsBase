@@ -95,7 +95,7 @@ bool geiger::run(int* count, time_t utc)
             if (utc >= _nextSampleTime) {
                 gmState = _continuous ? gmCONTINUOUS : gmCOLLECT;
                 printDateTime(utc, tzUTC, false);
-                Serial << F(" G-M collect") << endl;
+                Serial << F(" G-M collect\n");
                 ATOMIC_BLOCK(ATOMIC_RESTORESTATE) {
                     _count = 0;
                     _pulse = false;

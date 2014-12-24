@@ -18,7 +18,11 @@
 //
 //  xx    Store GroveStreams component ID in external EEPROM. xxDONExx
 //
-//  xx     Buffer http traffic to reduce number of packets sent. Current PUT text is ~250 chars.
+//  xx    Buffer http traffic to reduce number of packets sent. Current PUT text is ~250 chars.
+//        Print RTC time on startup after reset
+//        Check stats, i.e. are they for base station or remote(s) or both?
+//        GroveStreams library: Should X-Forwarded-For give the component ID rather than the local IP,
+//        to help avoid hitting the 10-sec posting limit?
 
 //Set fuses: E:FD, H:D6, L:FF (preserve EEPROM thru chip erase)
 
@@ -143,7 +147,7 @@ void setup(void)
 
     //report the reset source
     Serial.begin(115200);
-    Serial << endl << millis() << F(" MCU reset 0x0") << _HEX(mcusr);
+    Serial << endl << endl << millis() << F(" MCU reset 0x0") << _HEX(mcusr);
     if (mcusr & _BV(WDRF))  Serial << F(" WDRF");
     if (mcusr & _BV(BORF))  Serial << F(" BORF");
     if (mcusr & _BV(EXTRF)) Serial << F(" EXTRF");
@@ -261,6 +265,10 @@ void loop(void)
     wdt_reset();
     utc = NTP.now();
     if (xb.read() == RX_DATA) {
+        char rss[8];
+        itoa(xb.rss, rss, 10);
+        strcat(xb.payload, "&rss=");
+        strcat(xb.payload, rss);
         Serial << millis() << F(" XB RX ") << xb.payload << endl;
         if ( STATE == RUN ) {
             if ( GS.send(xb.rxNodeID, &xb.payload[5]) == SEND_ACCEPTED ) {
@@ -325,21 +333,21 @@ void loop(void)
             if (mcusr & _BV(PORF))  strcat(buf, "%20PORF");
             msSend = millis();
             GS.send(gsCompID, buf);
-            Serial << millis() << F(" NTP init") << endl;
+            Serial << millis() << F(" NTP init\n");
             STATE = GS_INIT;
         }
         break;
         
     case GS_INIT:
         if (gsStatus == HTTP_OK) {
-            Serial << millis() << F(" GS init") << endl;
+            Serial << millis() << F(" GS init\n");
             GEIGER.begin(gmIntervals[gmIntervalIdx], GM_POWER, utc);
             if (wdtEnable) wdt_enable(WDTO_8S);
-            Serial << millis() << F(" Watchdog Timer ") << (wdtEnable ? F("ON") : F("OFF")) << endl;
+            Serial << millis() << F(" Watchdog Timer ") << (wdtEnable ? F("ON\n") : F("OFF\n"));
             STATE = RUN;
         }
         else if ( millis() - msSend >= 10000 ) {
-            Serial << millis() << F(" GroveStreams send fail, resetting MCU") << endl;
+            Serial << millis() << F(" GroveStreams send fail, resetting MCU\n");
             mcuReset();
         }
         break;
@@ -352,7 +360,7 @@ void loop(void)
         //process user button input
         //        if (btnMode.wasPressed()) {
         //            NTP.schedSync(5);
-        //            Serial << millis() << F(" NTP Sync in 5 seconds") << endl;
+        //            Serial << millis() << F(" NTP Sync in 5 seconds\n");
         //        }
 
         if ( utc != utcLast ) {               //once-per-second processing
@@ -521,7 +529,7 @@ void runDisplay(int tF10, int cpm)
             DISP_STATE = DISP_CLOCK;
             lcd.clear();
             eeprom_update_byte( &ee_wdtEnable, wdtEnable );
-            Serial << millis() << F(" Watchdog Timer ") << (wdtEnable ? F("ON") : F("OFF")) << endl;
+            Serial << millis() << F(" Watchdog Timer ") << (wdtEnable ? F("ON\n") : F("OFF\n"));
             if (wdtEnable) {
                 wdt_enable(WDTO_8S);
             }

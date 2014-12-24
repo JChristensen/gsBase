@@ -7,8 +7,6 @@
 #define baseXBee_h
 
 const uint8_t PAYLOAD_LEN = 80;     //must be at least as large as defined in nodes that transmit data
-const int READ_TIMEOUT = 25;        //milliseconds
-
 enum xbeeReadStatus_t { NO_TRAFFIC, TX_STATUS, COMMAND_RESPONSE, MODEM_STATUS, RX_NO_ACK, RX_TIMESYNC, RX_DATA, RX_UNKNOWN, UNKNOWN_FRAME };
 
 class baseXBee : public XBee
@@ -22,6 +20,7 @@ class baseXBee : public XBee
         uint8_t txSec;            //transmit once a minute on this second, derived from the XBee NI
         char payload[PAYLOAD_LEN];
         char rxNodeID[9];
+        int8_t rss;                          //received signal strength, dBm
     
     private:
         void copyToBuffer(char* dest, uint32_t source);
@@ -39,7 +38,6 @@ class baseXBee : public XBee
         char nodeID[9];
         XBeeAddress64 tsAddr;                //time sync requestor's address
         char tsNodeID[9];                    //time sync requestor node ID
-        int8_t rss;                          //received signal strength, dBm
 };
 
 baseXBee::baseXBee(void)
@@ -185,7 +183,8 @@ void baseXBee::sendTimeSync(time_t utc)
         zbTX.setPayload((uint8_t*)payload);
         zbTX.setPayloadLength(9);
         send(zbTX);
-        Serial << endl << millis() << F("Time sync ") << tsNodeID << endl;
+        msTX = millis();
+        Serial << endl << millis() << F(" Time sync ") << tsNodeID << endl;
         tsNodeID[0] = 0;                               //request was serviced, none queued
     }
 }
@@ -217,19 +216,19 @@ void baseXBee::getRSS(void)
                     rss = -resp[0];
                 }
                 else {
-                    Serial << F("RSS LEN ERR") << endl;    //unexpected length
+                    Serial << F("RSS LEN ERR\n");    //unexpected length
                 }
             }
             else {
-                Serial << F("RSS ERR") << endl;            //status not ok
+                Serial << F("RSS ERR\n");            //status not ok
             }
         }
         else {
-            Serial << F("RSS UNEXP RESP") << endl;         //expecting AT_COMMAND_RESPONSE, got something else
+            Serial << F("RSS UNEXP RESP\n");         //expecting AT_COMMAND_RESPONSE, got something else
         }
     }
     else {
-        Serial << F("RSS NO RESP") << endl;                //timed out
+        Serial << F("RSS NO RESP\n");                //timed out
     }
 }
 
