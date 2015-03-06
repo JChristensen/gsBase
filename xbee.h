@@ -6,7 +6,7 @@
 #ifndef baseXBee_h
 #define baseXBee_h
 
-const uint8_t PAYLOAD_LEN = 80;     //must be at least as large as defined in nodes that transmit data
+const uint8_t PAYLOAD_LEN = 160;    //must be at least as large as defined in nodes that transmit data
 enum xbeeReadStatus_t { NO_TRAFFIC, TX_STATUS, COMMAND_RESPONSE, MODEM_STATUS, RX_NO_ACK, RX_TIMESYNC, RX_DATA, RX_UNKNOWN, UNKNOWN_FRAME };
 
 class baseXBee : public XBee

@@ -43,7 +43,7 @@
 #include <Timezone.h>               //http://github.com/JChristensen/Timezone
 #include <Wire.h>                   //http://arduino.cc/en/Reference/Wire
 #include <XBee.h>                   //http://code.google.com/p/xbee-arduino/
-#include <GroveStreams.h>           //http://github.com/JChristensen/Timezone
+#include <GroveStreams.h>           //http://github.com/JChristensen/GroveStreams
 #include "classes.h"                //part of this project
 #include "xbee.h"                   //part of this project
 
@@ -79,8 +79,7 @@ PROGMEM const char gsApiKey[] = "cbc8d222-6f25-3e26-9f6e-edfc3364d7fd";
 char gsCompID[9];                                //read from external EEPROM
 GroveStreams GS(gsServer, (const __FlashStringHelper *) gsApiKey, WAIT_LED);
 
-const uint8_t maxNtpTimeouts = 5;
-ntpClass NTP(maxNtpTimeouts, NTP_LED);
+ntpClass NTP(NTP_LED);
 
 EthernetClient client;
 MCP980X mcp9802(0);
@@ -296,12 +295,15 @@ void loop(void)
 
     if ( GEIGER.pulse() ) geigerLED.on();    //blip the LED
 
+    //note that setting the time *may* cause an interrupt, i.e. cause a falling edge on the SQW pin
+    //depending on whether the SQW pin is high at the time the time is set. turning the square wave
+    //off temporarily avoids this.
     ntpStatus_t ntpStatus = NTP.run();      //run the NTP state machine
     if (ntpStatus == NTP_SYNC && NTP.lastSyncType == TYPE_PRECISE) {
         utc = NTP.now();
-        RTC.squareWave(SQWAVE_NONE);
+        RTC.squareWave(SQWAVE_NONE);        //drives the INT/SQW pin high
         RTC.set(utc + 1);
-        RTC.squareWave(SQWAVE_1_HZ);
+        RTC.squareWave(SQWAVE_1_HZ);        //drives the INT/SQW pin low
         Serial << millis() << F(" NTP set the RTC: ");
         printDateTime(utc, tzUTC);
         ++rtcSet;
