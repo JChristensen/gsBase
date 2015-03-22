@@ -7,44 +7,45 @@
 #define baseXBee_h
 
 const uint8_t PAYLOAD_LEN = 160;    //must be at least as large as defined in nodes that transmit data
-enum xbeeReadStatus_t { NO_TRAFFIC, TX_STATUS, COMMAND_RESPONSE, MODEM_STATUS, RX_NO_ACK, RX_TIMESYNC, RX_DATA, RX_UNKNOWN, UNKNOWN_FRAME };
+enum xbeeReadStatus_t { 
+    NO_TRAFFIC, TX_STATUS, COMMAND_RESPONSE, MODEM_STATUS, RX_NO_ACK, RX_TIMESYNC, RX_DATA, RX_ERROR, RX_UNKNOWN, UNKNOWN_FRAME };
 
-class baseXBee : public XBee
+class baseXBee : 
+public XBee
 {
-    public:
-        baseXBee(void);
-        xbeeReadStatus_t read(void);
-        void reqNodeID(void);
-        void sendData(char* data);
-        void sendTimeSync(time_t utc);
-        uint8_t txSec;            //transmit once a minute on this second, derived from the XBee NI
-        char payload[PAYLOAD_LEN];
-        char rxNodeID[9];
-        int8_t rss;                          //received signal strength, dBm
-    
-    private:
-        void copyToBuffer(char* dest, uint32_t source);
-        uint32_t getFromBuffer(char* source);
-        void buildDataPayload(void);
-        void queueTimeSync(void);
-        void getRSS(void);
-        ZBTxStatusResponse zbStat;
-        AtCommandResponse atResp;
-        ModemStatusResponse zbMSR;
-        ZBRxResponse zbRX;
-        ZBTxRequest zbTX;
-        XBeeAddress64 coordAddr;
-        uint32_t msTX;                       //last XBee transmission time from millis()
-        char nodeID[9];
-        XBeeAddress64 tsAddr;                //time sync requestor's address
-        char tsNodeID[9];                    //time sync requestor node ID
+public:
+    baseXBee(void);
+    xbeeReadStatus_t read(void);
+    void sendTimeSync(time_t utc);
+    void reqNodeID(void);
+    uint8_t txSec;                       //transmit once a minute on this second, derived from the XBee NI
+    char payload[PAYLOAD_LEN];
+    char rxCompID[10];                   //GroveStreams component ID
+    int8_t rss;                          //received signal strength, dBm
+
+private:
+    bool parsePacket(void);
+    void queueTimeSync(void);
+    void getRSS(void);
+    void copyToBuffer(char* dest, uint32_t source);
+    uint32_t getFromBuffer(char* source);
+    ZBTxStatusResponse zbStat;
+    AtCommandResponse atResp;
+    ModemStatusResponse zbMSR;
+    ZBRxResponse zbRX;
+    ZBTxRequest zbTX;
+    XBeeAddress64 coordAddr;
+    uint32_t msTX;                       //last XBee transmission time from millis()
+    char nodeID[10];
+    XBeeAddress64 tsAddr;                //time sync requestor's address
+    char tsNodeID[10];                   //time sync requestor node ID
+    char packetType;                     //D = data packet, S = time sync request
 };
 
 baseXBee::baseXBee(void)
 {
     coordAddr = XBeeAddress64(0x0, 0x0);
 }
-
 
 //process incoming traffic from the XBee
 xbeeReadStatus_t baseXBee::read(void)
@@ -54,35 +55,41 @@ xbeeReadStatus_t baseXBee::read(void)
     readPacket();
     if ( getResponse().isAvailable() ) {
         uint32_t ms = millis();
-        char *p = &payload[0];
 
-        switch (getResponse().getApiId()) {      //what kind of packet did we get?
-
+        switch (getResponse().getApiId())                  //what kind of packet did we get?
+        {
         case ZB_RX_RESPONSE:                               //rx data packet
             getResponse().getZBRxResponse(zbRX);           //get the received data
-            switch (zbRX.getOption() & 0x01) {             //check ack bit only
+            switch (zbRX.getOption() & 0x01)               //check ack bit only
+            {
             case ZB_PACKET_ACKNOWLEDGED:
-                for (uint8_t i=0; i<PAYLOAD_LEN; i++) {    //copy the received data to our buffer
-                    *p++ = zbRX.getData(i);
-                }
-                *p = 0;                                    //put terminator on payload
-                getRSS();                                  //get the received signal strength
                 //process the received data
                 Serial << endl << ms << F(" XB RX/ACK\n");
-                switch (payload[0]) {                      //what type of packet
-                case 'S':                                  //time sync request
-                    queueTimeSync();
-                    return RX_TIMESYNC;
-                    break;
-                case 'D':                                  //data headed for the web
-                    strncpy(rxNodeID, &payload[1], 4);
-                    rxNodeID[4] = 0;
-                    return RX_DATA;
-                    break;
-                default:                                   //not expecting anything else
-                    Serial << endl << ms << F(" XB unknown RX\n");
-                    return RX_UNKNOWN;
-                    break;
+                getRSS();                                  //get the received signal strength
+                if ( parsePacket() ) {
+                    switch (packetType)                    //what type of packet
+                    {
+                    case 'S':                              //time sync request
+                        queueTimeSync();
+                        return RX_TIMESYNC;
+                        break;
+                    case 'D':                              //data headed for the web
+                        return RX_DATA;
+                        break;
+                    default:                               //not expecting anything else
+                        Serial << endl << ms << F(" XB unknown packet type\n");
+                        return RX_UNKNOWN;
+                        break;
+                    }
+                }
+                else {
+                    uint8_t *d = zbRX.getData();
+                    uint8_t nChar = zbRX.getDataLength();
+                    uint8_t first = nChar > 20 ? 20 : nChar;
+                    Serial << endl << ms << F(" XB RX malformed packet, ") << first << '/' << nChar << F(" bytes: ");
+                    for ( uint8_t i = 0; i < first; ++i ) Serial << *d++;
+                    Serial << endl;
+                    return RX_ERROR;
                 }
                 break;
             default:
@@ -159,16 +166,6 @@ xbeeReadStatus_t baseXBee::read(void)
     return NO_TRAFFIC;
 }
 
-//queue a time sync request
-void baseXBee::queueTimeSync(void)
-{
-    if (tsNodeID[0] == 0) {                            //can only queue one request, ignore request if already have one queued
-        tsAddr = zbRX.getRemoteAddress64();            //save the sender's address
-        strncpy(tsNodeID, &payload[1], 4);             //save the sender's node ID
-        tsNodeID[4] = 0;                               //terminator
-    }
-}
-
 //respond to a previously queued time sync request
 void baseXBee::sendTimeSync(time_t utc)
 {
@@ -193,16 +190,61 @@ void baseXBee::sendTimeSync(time_t utc)
 //Response is processed in read().
 void baseXBee::reqNodeID(void)
 {
-    uint8_t atCmd[] = { 'N', 'I' };
+    uint8_t atCmd[] = { 
+        'N', 'I'                     };
     AtCommandRequest atCmdReq = AtCommandRequest(atCmd);
     send(atCmdReq);
     Serial << endl << millis() << F(" XB REQ NI\n");
 }
 
+//parse a received packet; check format, extract GroveStreams component ID and data.
+//returns false if there is an error in the format, else true.
+bool baseXBee::parsePacket(void)
+{
+
+
+    uint8_t *d = zbRX.getData();
+    uint8_t nCh = zbRX.getDataLength();
+    Serial << endl << millis() << F(" XB RX ");
+    for ( uint8_t i = 0; i < nCh; ++i ) Serial << *d++;
+    
+
+
+
+    if ( *d++ != 0x01 ) return false;          //check for SOH start character
+    packetType = *d++;                         //save the packet type
+    char *c = rxCompID;                        //now parse the component ID
+    uint8_t nChar = 0;
+    char ch;
+    while ( (ch = *d++) != 0x02 ) {            //look for STX
+        if ( ++nChar > 8 ) return false;       //missing
+        *c++ = ch;
+    }
+    *c++ = 0;                                  //string terminator
+    char *p = payload;                         //now copy the rest of the payload data
+    for (uint8_t i = nChar+2; i < zbRX.getDataLength(); ++i ) {
+        *p++ = *d++;
+    }
+    *p++ = 0;                                  //string terminator
+    Serial << millis() << F(" XB RX ") << rxCompID << ' ' << payload << endl;
+    return true;
+}
+
+//queue a time sync request
+void baseXBee::queueTimeSync(void)
+{
+    if (tsNodeID[0] == 0) {                            //can only queue one request, ignore request if already have one queued
+        tsAddr = zbRX.getRemoteAddress64();            //save the sender's address
+        strncpy(tsNodeID, &payload[1], 4);             //save the sender's node ID
+        tsNodeID[4] = 0;                               //terminator
+    }
+}
+
 //returns received signal strength value for the last RF data packet.
 void baseXBee::getRSS(void)
 {
-    uint8_t atCmd[] = {'D', 'B'};
+    uint8_t atCmd[] = {
+        'D', 'B'                    };
     AtCommandRequest atCmdReq = AtCommandRequest(atCmd);
     send(atCmdReq);
     if (readPacket(10)) {
@@ -232,41 +274,15 @@ void baseXBee::getRSS(void)
     }
 }
 
-//Build & send an XBee data packet.
-//Our data packet is defined as follows:
-//Byte  0:    Packet type, D=data, T=Tweet
-//Bytes 1-16: 16-character ThingSpeak write API key or
-//            ThingTweet API key
-//Bytes 17-n: (D packet) Data to be sent to ThingSpeak, in CSV
-//            format, terminated by a zero byte. Note it is the remote
-//            unit's responsibility to format the CSV data.
-//Bytes 17-n: (T packet) Text of tweet, terminated by a zero byte.
-//
-//The maximum XBee packet size is set by XBEE_PAYLOAD_LEN in the main
-//module. Note there is an upper limit, see the XBee ATNP command.
-void baseXBee::sendData(char* data)
-{
-    payload[0] = 'D';                      //start with D header for a data packet
-    payload[1] = 0;
-    strcat(payload, nodeID);               //node ID next
-    strcat(payload, data);                 //copy the CSV data
-    zbTX.setAddress64(coordAddr);          //build the tx request packet
-    zbTX.setAddress16(0xFFFE);
-    zbTX.setPayload((uint8_t*)payload);
-    zbTX.setPayloadLength(strlen(payload));
-    send(zbTX);
-    msTX = millis();
-    Serial << endl << msTX << F(" XB TX\n");
-}
-
 //copy a four-byte integer to the designated offset in the buffer
 void baseXBee::copyToBuffer(char* dest, uint32_t source)
 {
     union charInt_t {
         char c[4];
         uint32_t i;
-    } data;
-    
+    } 
+    data;
+
     data.i = source;
     dest[0] = data.c[0];
     dest[1] = data.c[1];
@@ -280,7 +296,8 @@ uint32_t baseXBee::getFromBuffer(char* source)
     union charInt_t {
         char c[4];
         uint32_t i;
-    } data;
+    } 
+    data;
 
     data.c[0] = source[0];
     data.c[1] = source[1];
@@ -291,4 +308,9 @@ uint32_t baseXBee::getFromBuffer(char* source)
 }
 
 #endif
+
+
+
+
+
 

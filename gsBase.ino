@@ -146,7 +146,8 @@ void setup(void)
 
     //report the reset source
     Serial.begin(115200);
-    Serial << endl << endl << millis() << F(" MCU reset 0x0") << _HEX(mcusr);
+    Serial << F( "\n" __FILE__ " " __DATE__ " " __TIME__ "\n" );
+    Serial << F("MCU reset 0x0") << _HEX(mcusr);
     if (mcusr & _BV(WDRF))  Serial << F(" WDRF");
     if (mcusr & _BV(BORF))  Serial << F(" BORF");
     if (mcusr & _BV(EXTRF)) Serial << F(" EXTRF");
@@ -268,9 +269,8 @@ void loop(void)
         itoa(xb.rss, rss, 10);
         strcat(xb.payload, "&rss=");
         strcat(xb.payload, rss);
-        Serial << millis() << F(" XB RX ") << xb.payload << endl;
         if ( STATE == RUN ) {
-            if ( GS.send(xb.rxNodeID, &xb.payload[5]) == SEND_ACCEPTED ) {
+            if ( GS.send(xb.rxCompID, xb.payload) == SEND_ACCEPTED ) {
                 Serial << F("Post OK\n");
             }
             else {
