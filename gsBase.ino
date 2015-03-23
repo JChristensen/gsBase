@@ -63,7 +63,6 @@ const uint8_t DN_BUTTON = 21;       //down button
 const uint8_t GM_POWER = 22;        //geiger power enable
 
 //global variables
-const int txSec = 10;               //transmit data once per minute, on this second
 time_t utc, local;                  //current times
 time_t startupTime;                 //sketch start time
 uint8_t gmIntervalIdx;              //index to geiger sample interval array
@@ -244,6 +243,9 @@ void setup(void)
     printDateTime(utc, tzUTC);
 
     geigerLED.begin(GM_PULSE_LED, PULSE_DUR);
+    
+    //get the XBee's node ID
+    xb.txSec = 10;                //fake it for now
 }
 
 enum STATE_t { NTP_INIT, GS_INIT, RUN, RESET_WARN, RESET_WAIT } STATE;
@@ -270,8 +272,8 @@ void loop(void)
         strcat(xb.payload, "&rss=");
         strcat(xb.payload, rss);
         if ( STATE == RUN ) {
-            if ( GS.send(xb.rxCompID, xb.payload) == SEND_ACCEPTED ) {
-                Serial << F("Post OK\n");
+            if ( GS.send(xb.sendingCompID, xb.payload) == SEND_ACCEPTED ) {
+                Serial << F("\nPost OK\n");
             }
             else {
                 Serial << F("Post FAIL\n");
@@ -323,7 +325,7 @@ void loop(void)
         //wait until we have a good time from the NTP server
         if ( (ntpStatus == NTP_SYNC && NTP.lastSyncType == TYPE_PRECISE) || NTP.lastSyncType == TYPE_SKIPPED ) {
             nextTimePrint = nextMinute();
-            nextTransmit = nextTimePrint + txSec;
+            nextTransmit = nextTimePrint + xb.txSec;
             startupTime = utc;
             //build reset message, send to GroveStreams
             strcpy(buf, "&msg=MCU%20reset%200x");
