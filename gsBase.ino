@@ -1,4 +1,5 @@
-//TO DO:  Add uptime stat
+//TO DO:  Add uptime stat -- DONE
+//        XBee.begin() is never called.
 //        Diagnostic stats on/off, EEPROM parameter
 //        Base data: uptime, seq, temp, cpm, messages
 //        Diagnostic stats: success, fail, timeout, connTime, respTime, discTime, freeMem, RTC sets, sockets(?)
@@ -23,6 +24,8 @@
 //        Check stats, i.e. are they for base station or remote(s) or both?
 //        GroveStreams library: Should X-Forwarded-For give the component ID rather than the local IP,
 //        to help avoid hitting the 10-sec posting limit?
+//
+//        Pullups on for unused pins.
 
 //Set fuses: E:FD, H:D6, L:FF (preserve EEPROM thru chip erase)
 
@@ -32,7 +35,8 @@
 #include <DS3232RTC.h>              //http://github.com/JChristensen/DS3232RTC
 #include <Ethernet.h>               //http://arduino.cc/en/Reference/Ethernet
 #include <extEEPROM.h>              //http://github.com/JChristensen/extEEPROM
-#include <LiquidTWI.h>              //http://forums.adafruit.com/viewtopic.php?f=19&t=21586&p=113177
+#include <LiquidTWI.h>              //http://forums.adafruit.com/viewtopic.php?t=21586
+//also                              //http://dl.dropboxusercontent.com/u/35284720/postfiles/LiquidTWI-1.5.1.zip
 #include <MCP980X.h>                //http://github.com/JChristensen/MCP980X
 #include <MemoryFree.h>             //http://playground.arduino.cc/Code/AvailableMemory
 #include <movingAvg.h>              //http://github.com/JChristensen/movingAvg
