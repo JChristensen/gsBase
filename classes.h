@@ -7,12 +7,11 @@
 #include <Time.h>
 #include <Streaming.h>    //http://arduiniana.org/libraries/streaming/
 
-//void timeStamp(Print& p, time_t t);
 extern const char* tzUTC;
+extern gsXBee XB;
 
 volatile bool _pulse;             //ISR pulse flag
 volatile int _count;              //ISR pulse count
-const time_t WARMUP_TIME = 5;     //seconds to turn on the GC before the sample time to let it settle in a bit
 
 ISR(INT0_vect)
 {
@@ -44,7 +43,8 @@ void geiger::begin(int sampleInterval, uint8_t powerPin, time_t utc)
 {
     EICRA |= _BV(ISC01);                 //INT0 on falling edge
     EIFR |= _BV(INTF0);                  //ensure interrupt flag is cleared (setting ISC bits can set it)
-    ATOMIC_BLOCK(ATOMIC_RESTORESTATE) {
+    ATOMIC_BLOCK(ATOMIC_RESTORESTATE)
+    {
         _count = 0;
         _pulse = false;
     }
@@ -69,21 +69,23 @@ bool geiger::run(int* count, time_t utc)
 {
     bool ret = false;
 
-    if (_started) {
+    if (_started)
+    {
         switch (gmState)
         {
         case gmINIT:
             gmState = gmWAIT;
             digitalWrite(_powerPin, LOW);   //if interval is changed while collect is in progress, it gets aborted, so ensure the power is turned off here
             _nextSampleTime = utc + _sampleInterval - utc % _sampleInterval;    //next "neat" time
-            if (_nextSampleTime - utc < WARMUP_TIME) _nextSampleTime += _sampleInterval;    //make sure not too soon
+            if (_nextSampleTime - utc < XB.txWarmup) _nextSampleTime += _sampleInterval;    //make sure not too soon
             printDateTime(utc, tzUTC, false);
             Serial << F(" G-M wait, next sample: ");
             printDateTime(_nextSampleTime, tzUTC);
             break;
     
         case gmWAIT:
-            if (utc >= _nextSampleTime - WARMUP_TIME) {
+            if (utc >= _nextSampleTime - XB.txWarmup)
+            {
                 gmState = gmWARMUP;
                 digitalWrite(_powerPin, HIGH);
                 printDateTime(utc, tzUTC, false);
@@ -92,11 +94,13 @@ bool geiger::run(int* count, time_t utc)
             break;
     
         case gmWARMUP:
-            if (utc >= _nextSampleTime) {
+            if (utc >= _nextSampleTime)
+            {
                 gmState = _continuous ? gmCONTINUOUS : gmCOLLECT;
                 printDateTime(utc, tzUTC, false);
                 Serial << F(" G-M collect\n");
-                ATOMIC_BLOCK(ATOMIC_RESTORESTATE) {
+                ATOMIC_BLOCK(ATOMIC_RESTORESTATE)
+                {
                     _count = 0;
                     _pulse = false;
                 }
@@ -106,9 +110,11 @@ bool geiger::run(int* count, time_t utc)
             break;
     
         case gmCOLLECT:
-            if (utc >= _nextSampleTime + 60) {
+            if (utc >= _nextSampleTime + 60)
+            {
                 EIMSK &= ~_BV(INT0);                 //disable the interrupt
-                ATOMIC_BLOCK(ATOMIC_RESTORESTATE) {
+                ATOMIC_BLOCK(ATOMIC_RESTORESTATE)
+                {
                     *count = _count;
                     _count = 0;
                     _pulse = false;
@@ -124,8 +130,10 @@ bool geiger::run(int* count, time_t utc)
             break;
     
         case gmCONTINUOUS:
-            if (utc >= _nextSampleTime + 60) {
-                ATOMIC_BLOCK(ATOMIC_RESTORESTATE) {
+            if (utc >= _nextSampleTime + 60)
+            {
+                ATOMIC_BLOCK(ATOMIC_RESTORESTATE)
+                {
                     *count = _count;
                     _count = 0;
                     _pulse = false;
@@ -147,7 +155,8 @@ bool geiger::pulse(void)
 {
     bool p;
 
-    ATOMIC_BLOCK(ATOMIC_RESTORESTATE) {
+    ATOMIC_BLOCK(ATOMIC_RESTORESTATE)
+    {
         if ( (p = _pulse) ) _pulse = false;
     }
     return p;

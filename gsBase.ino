@@ -1,14 +1,18 @@
-//TO DO:  Add uptime stat -- DONE
-//        XBee.begin() is never called.
+//TO DO:  Review transmission timing (nextTransmit) and G-M timing.
+//        Add uptime stat -- DONE
+//        XBee.begin() is never called. -- FIXED.
 //        Diagnostic stats on/off, EEPROM parameter
 //        Base data: uptime, seq, temp, cpm, messages
 //        Diagnostic stats: success, fail, timeout, connTime, respTime, discTime, freeMem, RTC sets, sockets(?)
 //
 //        LCD stats: uptime, success, fail, timeout, memory, sockets(?)
 //
+//        FIXED
+//        {
 //        SOMEONE (mainline code or GS class) needs to count errors returned by GS.run() -- e.g. CONNECT_FAILED status is not being tracked anywhere.
 //        Failures when calling GS.send() are tracked in gsBase.ino in GS.fail, not sure about this.
 //        Probably the GS class needs to track these stats at least mostly.
+//        }
 //
 //        Check return from Ethernet.begin() (int, 1=success, 0=fail)
 //        Check return from Ethernet.maintain() (byte, 1 or 3 = fail, 0, 2, 4 = success)
@@ -35,6 +39,8 @@
 #include <DS3232RTC.h>              //http://github.com/JChristensen/DS3232RTC
 #include <Ethernet.h>               //http://arduino.cc/en/Reference/Ethernet
 #include <extEEPROM.h>              //http://github.com/JChristensen/extEEPROM
+#include <GroveStreams.h>           //http://github.com/JChristensen/GroveStreams
+#include <gsXBee.h>
 #include <LiquidTWI.h>              //http://forums.adafruit.com/viewtopic.php?t=21586
 //also                              //http://dl.dropboxusercontent.com/u/35284720/postfiles/LiquidTWI-1.5.1.zip
 #include <MCP980X.h>                //http://github.com/JChristensen/MCP980X
@@ -47,60 +53,55 @@
 #include <Timezone.h>               //http://github.com/JChristensen/Timezone
 #include <Wire.h>                   //http://arduino.cc/en/Reference/Wire
 #include <XBee.h>                   //http://code.google.com/p/xbee-arduino/
-#include <GroveStreams.h>           //http://github.com/JChristensen/GroveStreams
 #include "classes.h"                //part of this project
-#include "xbee.h"                   //part of this project
+//#include "xbee.h"                   //part of this project
 
 //#define COUNT_LOOPS                 //count RUN state loops/sec
 
 //pin assignments
-const uint8_t RTC_1HZ = 2;          //RTC 1Hz interrupt, INT2
-const uint8_t GM_INPUT = 10;        //G-M pulse interrupt, INT0
-const uint8_t WIZ_RESET = 12;       //WIZnet module reset
-const uint8_t HB_LED = 13;          //heartbeat LED
-const uint8_t NTP_LED = 14;         //ntp time sync
-const uint8_t WAIT_LED = 15;        //waiting for server response
-const uint8_t GM_PULSE_LED = 18;    //blink on pulse from G-M counter
-const uint8_t SET_BUTTON = 19;      //set button
-const uint8_t UP_BUTTON = 20;       //up button
-const uint8_t DN_BUTTON = 21;       //down button
-const uint8_t GM_POWER = 22;        //geiger power enable
+const uint8_t
+    RTC_1HZ(2),                     //RTC 1Hz interrupt, INT2
+    GM_INPUT(10),                   //G-M pulse interrupt, INT0
+    WIZ_RESET(12),                  //WIZnet module reset
+    HB_LED(13),                     //heartbeat LED
+    NTP_LED(14),                    //ntp time sync
+    WAIT_LED(15),                   //waiting for server response
+    GM_PULSE_LED(18),               //blink on pulse from G-M counter
+    SET_BUTTON(19),                 //set button
+    UP_BUTTON(20),                  //up button
+    DN_BUTTON(21),                  //down button
+    GM_POWER(22);                   //geiger power enable
 
 //global variables
 time_t utc, local;                  //current times
 time_t startupTime;                 //sketch start time
 uint8_t gmIntervalIdx;              //index to geiger sample interval array
 EEMEM uint8_t ee_gmIntervalIdx;     //copy persisted in EEPROM
-const uint8_t gmIntervalIdx_DEFAULT = 3;    //index to the default value (i.e. 3 -> 15 min)
+const uint8_t gmIntervalIdx_DEFAULT(3);    //index to the default value (i.e. 3 -> 15 min)
 const int gmIntervals[] = { 1, 5, 10, 15, 20, 30, 60 };
 bool wdtEnable;                     //wdt enable flag
-EEMEM uint8_t ee_wdtEnable;            //copy persisted in EEPROM
-
+EEMEM uint8_t ee_wdtEnable;         //copy persisted in EEPROM
+const uint32_t RESET_DELAY(60);     //seconds before resetting the MCU for initialization failures
+const char* NTP_POOL = "pool.ntp.org";
 //object instantiations
 const char* gsServer = "grovestreams.com";
 PROGMEM const char gsApiKey[] = "cbc8d222-6f25-3e26-9f6e-edfc3364d7fd";
-char gsCompID[9];                                //read from external EEPROM
 GroveStreams GS(gsServer, (const __FlashStringHelper *) gsApiKey, WAIT_LED);
-
 ntpClass NTP(NTP_LED);
-
-EthernetClient client;
 MCP980X mcp9802(0);
 movingAvg avgTemp;
 LiquidTWI lcd(0); //i2c address 0 (0x20)
 extEEPROM eep(kbits_2, 1, 8);
+const unsigned long PULSE_DUR(50);  //blink duration for the G-M one-shot LED, ms
+oneShotLED geigerLED;
+gsXBee XB;
 
-const bool PULLUP = true;
-const bool INVERT = true;
-const unsigned long DEBOUNCE_MS = 25;
+const bool PULLUP(true);
+const bool INVERT(true);
+const unsigned long DEBOUNCE_MS(25);
 Button btnSet(SET_BUTTON, PULLUP, INVERT, DEBOUNCE_MS);
 Button btnUp(UP_BUTTON, PULLUP, INVERT, DEBOUNCE_MS);
 Button btnDn(DN_BUTTON, PULLUP, INVERT, DEBOUNCE_MS);
-
-const unsigned long PULSE_DUR = 50; //blink duration for the G-M one-shot LED, ms
-oneShotLED geigerLED;
-
-baseXBee xb;
 
 //Continental US Time Zones
 TimeChangeRule EDT = { "EDT", Second, Sun, Mar, 2, -240 };    //Daylight time = UTC - 4 hours
@@ -157,16 +158,22 @@ void setup(void)
     if (mcusr & _BV(PORF))  Serial << F(" PORF");
     Serial << endl;
 
+    //XBee initialization
+    Serial.flush();
+    if ( !XB.begin(Serial) ) XB.mcuReset(RESET_DELAY * 1000UL);    //reset if XBee initialization fails
+
     //get geiger interval from eeprom and ensure that it's valid
     gmIntervalIdx = eeprom_read_byte( &ee_gmIntervalIdx );
-    if ( gmIntervalIdx >= sizeof(gmIntervals) / sizeof(gmIntervals[0]) ) {
+    if ( gmIntervalIdx >= sizeof(gmIntervals) / sizeof(gmIntervals[0]) )
+    {
         gmIntervalIdx = gmIntervalIdx_DEFAULT;
         eeprom_write_byte( &ee_gmIntervalIdx, gmIntervalIdx);
     }
 
     //same for the time zone index
     tzIndex = eeprom_read_byte( &ee_tzIndex );
-    if ( tzIndex >= sizeof(tzNames) / sizeof(tzNames[0]) ) {
+    if ( tzIndex >= sizeof(tzNames) / sizeof(tzNames[0]) )
+    {
         tzIndex = 0;
         eeprom_write_byte( &ee_tzIndex, tzIndex);
     }
@@ -188,7 +195,8 @@ void setup(void)
     //RTC initialization
     lcd << F("RTC SYNC");
     utc = RTC.get();                       //try to read the time from the RTC
-    if ( utc == 0 ) {                      //couldn't read it, something wrong
+    if ( utc == 0 )                        //couldn't read it, something wrong
+    {
         lcd << F(" FAIL");
         digitalWrite( WAIT_LED, HIGH);
         while (1);
@@ -201,7 +209,8 @@ void setup(void)
     lcd << F("MAC address");
     lcd.setCursor(0, 1);
     eep.read(0xFA, mac, 6);
-    for (int i=0; i<6; ++i) {
+    for (int i=0; i<6; ++i)
+    {
         if (mac[i] < 16) lcd << '0';
         lcd << _HEX( mac[i] );
     }
@@ -217,7 +226,7 @@ void setup(void)
     delay(1000);
 
     //start NTP, display server IP
-    NTP.begin();
+    NTP.begin(NTP_POOL);
     lcd.clear();
     lcd << F("NTP Server");
     lcd.setCursor(0, 1);
@@ -225,7 +234,6 @@ void setup(void)
     delay(1000);
 
     //connect to GroveStreams, display IP
-    eep.read(0, (uint8_t*)gsCompID, 9);      //get the component ID from EEPROM
     GS.begin();
     lcd.clear();
     lcd << F("GroveStreams");
@@ -247,9 +255,6 @@ void setup(void)
     printDateTime(utc, tzUTC);
 
     geigerLED.begin(GM_PULSE_LED, PULSE_DUR);
-    
-    //get the XBee's node ID
-    xb.txSec = 10;                //fake it for now
 }
 
 enum STATE_t { NTP_INIT, GS_INIT, RUN, RESET_WARN, RESET_WAIT } STATE;
@@ -270,20 +275,25 @@ void loop(void)
 
     wdt_reset();
     utc = NTP.now();
-    if (xb.read() == RX_DATA) {
+    if (XB.read() == RX_DATA)
+    {
         char rss[8];
-        itoa(xb.rss, rss, 10);
-        strcat(xb.payload, "&rss=");
-        strcat(xb.payload, rss);
-        if ( STATE == RUN ) {
-            if ( GS.send(xb.sendingCompID, xb.payload) == SEND_ACCEPTED ) {
+        itoa(XB.rss, rss, 10);
+        strcat(XB.payload, "&rss=");
+        strcat(XB.payload, rss);
+        if ( STATE == RUN )
+        {
+            if ( GS.send(XB.sendingCompID, XB.payload) == SEND_ACCEPTED )
+            {
                 Serial << F("\nPost OK\n");
             }
-            else {
+            else
+            {
                 Serial << F("Post FAIL\n");
             }
         }
-        else {
+        else
+        {
             Serial << F("...ignored\n");
         }
     }
@@ -293,7 +303,8 @@ void loop(void)
     geigerLED.run();
 
     //check for data from the G-M counter
-    if (GEIGER.run(&cpm, utc)) {
+    if (GEIGER.run(&cpm, utc))
+    {
         haveCPM = true;
         printDateTime(utc, tzUTC, false);
         Serial << F(" G-M counts/min ") << cpm << endl;
@@ -305,7 +316,8 @@ void loop(void)
     //depending on whether the SQW pin is high at the time the time is set. turning the square wave
     //off temporarily avoids this.
     ntpStatus_t ntpStatus = NTP.run();      //run the NTP state machine
-    if (ntpStatus == NTP_SYNC && NTP.lastSyncType == TYPE_PRECISE) {
+    if (ntpStatus == NTP_SYNC && NTP.lastSyncType == TYPE_PRECISE)
+    {
         utc = NTP.now();
         RTC.squareWave(SQWAVE_NONE);        //drives the INT/SQW pin high
         RTC.set(utc + 1);
@@ -314,7 +326,8 @@ void loop(void)
         printDateTime(utc, tzUTC);
         ++rtcSet;
     }
-    else if (ntpStatus == NTP_RESET) {
+    else if (ntpStatus == NTP_RESET)
+    {
         STATE = RESET_WARN;
     }
 
@@ -327,9 +340,10 @@ void loop(void)
 
     case NTP_INIT:
         //wait until we have a good time from the NTP server
-        if ( (ntpStatus == NTP_SYNC && NTP.lastSyncType == TYPE_PRECISE) || NTP.lastSyncType == TYPE_SKIPPED ) {
+        if ( (ntpStatus == NTP_SYNC && NTP.lastSyncType == TYPE_PRECISE) || NTP.lastSyncType == TYPE_SKIPPED )
+        {
             nextTimePrint = nextMinute();
-            nextTransmit = nextTimePrint + xb.txSec;
+            nextTransmit = nextTimePrint + XB.txInterval * 60;
             startupTime = utc;
             //build reset message, send to GroveStreams
             strcpy(buf, "&msg=MCU%20reset%200x");
@@ -340,21 +354,23 @@ void loop(void)
             if (mcusr & _BV(EXTRF)) strcat(buf, "%20EXTRF");
             if (mcusr & _BV(PORF))  strcat(buf, "%20PORF");
             msSend = millis();
-            GS.send(gsCompID, buf);
+            GS.send(XB.compID, buf);
             Serial << millis() << F(" NTP init\n");
             STATE = GS_INIT;
         }
         break;
         
     case GS_INIT:
-        if (gsStatus == HTTP_OK) {
+        if (gsStatus == HTTP_OK)
+        {
             Serial << millis() << F(" GS init\n");
             GEIGER.begin(gmIntervals[gmIntervalIdx], GM_POWER, utc);
             if (wdtEnable) wdt_enable(WDTO_8S);
             Serial << millis() << F(" Watchdog Timer ") << (wdtEnable ? F("ON\n") : F("OFF\n"));
             STATE = RUN;
         }
-        else if ( millis() - msSend >= 10000 ) {
+        else if ( millis() - msSend >= 10000 )
+        {
             Serial << millis() << F(" GroveStreams send fail, resetting MCU\n");
             mcuReset();
         }
@@ -371,9 +387,10 @@ void loop(void)
         //            Serial << millis() << F(" NTP Sync in 5 seconds\n");
         //        }
 
-        if ( utc != utcLast ) {               //once-per-second processing
+        if ( utc != utcLast )                 //once-per-second processing
+        {
             utcLast = utc;
-            xb.sendTimeSync(utc);
+            XB.sendTimeSync(utc);
             uint8_t utcM = minute(utc);
             uint8_t utcS = second(utc);
 #ifdef COUNT_LOOPS
@@ -383,38 +400,41 @@ void loop(void)
             loopCount = 0;
 #endif
 
-            if (utc >= nextTransmit) {        //time to send data?
-                nextTransmit += 60;
+            if (utc >= nextTransmit)          //time to send data?
+            {
+                nextTransmit += XB.txInterval * 60;
                 char upBuf[12];
                 timeSpan(upBuf, utc - startupTime);    //uptime to send to GS
-                sprintf(buf,"&u=%s&a=%u&c=%i.%i&j=%u&k=%u&l=%u&m=%lu&n=%lu&p=%lu&q=%u&r=%u", upBuf, GS.seq, tF10/10, tF10%10, GS.success, GS.fail, GS.timeout, GS.connTime, GS.respTime, GS.discTime, GS.freeMem, rtcSet);
-                if (haveCPM) {                //have a reading from the g-m counter, add it on
+                sprintf(buf,"&u=%s&a=%u&c=%i.%i&j=%u&k=%u&l=%u&m=%lu&n=%lu&p=%lu&r=%u", upBuf, GS.sendSeq, tF10/10, tF10%10, GS.httpOK, GS.connFail, GS.recvTimeout, GS.connTime, GS.respTime, GS.discTime, rtcSet);
+                if (haveCPM)                  //have a reading from the g-m counter, add it on
+                {
                     char aBuf[8];
                     itoa(cpm, aBuf, 10);
                     strcat(buf, "&b=");
                     strcat(buf, aBuf);
                     haveCPM = false;
                 }
-                if ( GS.send(gsCompID, buf) == SEND_ACCEPTED ) {
+                if ( GS.send(XB.compID, buf) == SEND_ACCEPTED )
+                {
                     Serial << F("Post OK");
-                    ++GS.success;
                 }
-                else {
+                else
+                {
                     Serial << F("Post FAIL");
-                    ++GS.fail;
                 }
-                ++GS.seq;
-                Serial << F(" seq=") << GS.seq << F(" tempF=") << tF10/10 << '.' << tF10%10 << F(" success=") << GS.success << F(" fail=") << GS.fail << F(" timeout=") << GS.timeout;
-                Serial << F(" cnct=") << GS.connTime << F(" resp=") << GS.respTime << F(" disc=") << GS.discTime << F(" mem=") << GS.freeMem << F(" rtcSet=") << rtcSet << endl;
+                Serial << F(" seq=") << GS.sendSeq << F(" tempF=") << tF10/10 << '.' << tF10%10 << F(" success=") << GS.httpOK << F(" fail=") << GS.connFail << F(" timeout=") << GS.recvTimeout;
+                Serial << F(" cnct=") << GS.connTime << F(" resp=") << GS.respTime << F(" disc=") << GS.discTime << F(" rtcSet=") << rtcSet << endl;
             }
 
             digitalWrite(HB_LED, !(utcS & 1));    //run the heartbeat LED
 
-            if ( utcS % 10 == 0 ) {           //read temperature every 10 sec
+            if ( utcS % 10 == 0 )                 //read temperature every 10 sec
+            {
                 tF10 = avgTemp.reading( mcp9802.readTempF10(AMBIENT) );
             }
 
-            if (utc >= nextTimePrint) {             //print time to Serial once per minute
+            if (utc >= nextTimePrint)             //print time to Serial once per minute
+            {
                 timeSpan(buf, utc - startupTime);
                 Serial << endl << millis() << F(" Local: ");
                 printDateTime(local, tcr -> abbrev, false);
@@ -423,7 +443,8 @@ void loop(void)
 //                uint8_t nSock = showSockStatus();
 //                Serial << F("Sockets available: ") << nSock << endl;
                 //renew the DHCP lease hourly
-                if (utcM == 0 && utcS == 0) {
+                if (utcM == 0 && utcS == 0)
+                {
                     unsigned long msStart = millis();
                     uint8_t mStat = Ethernet.maintain();
                     unsigned long msEnd = millis();
@@ -434,10 +455,11 @@ void loop(void)
         break;
 
     case RESET_WARN:
-        if (millis() - msSend >= 500) {        //keep retrying if needed
+        if (millis() - msSend >= 500)          //keep retrying if needed
+        {
             msSend = millis();
             strcpy(buf, "&msg=Lost%20NTP%20server%20-%20reset%20MCU");
-            if (GS.send(gsCompID, buf) == SEND_ACCEPTED) STATE = RESET_WAIT;
+            if (GS.send(XB.compID, buf) == SEND_ACCEPTED) STATE = RESET_WAIT;
         }
         break;
 
@@ -461,24 +483,28 @@ void runDisplay(int tF10, int cpm)
     switch (DISP_STATE)
     {
     case DISP_CLOCK:
-        if (btnSet.wasReleased()) {
+        if (btnSet.wasReleased())
+        {
             DISP_STATE = SET_TZ;
             lcd.clear();
             lcd << F("Timezone:");
             lcd.setCursor(0, 1);
             lcd << tzNames[tzIndex];
         }
-        if (utc != utcLast) {
+        if ( utc != utcLast )
+        {
             utcLast = utc;
             local = (*tz).toLocal(utc, &tcr);
             lcd.setCursor(0, 0);        //lcd display, time & temp on first row
             printTime(lcd, local);
             lcd << tcr -> abbrev << ' ' << (tF10 + 5) / 10 << '\xDF';
             lcd.setCursor(0, 1);        //move to second row
-            if (dispMode >= 2) {
+            if (dispMode >= 2)
+            {
                 printDayDate(lcd, local);
             }
-            else {
+            else
+            {
                 itoa(cpm, lcdBuf, 10);
                 strcat(lcdBuf, cpmText);
                 strncat( lcdBuf, spaces, 16 - strlen(lcdBuf) );
@@ -489,7 +515,8 @@ void runDisplay(int tF10, int cpm)
         break;
 
     case SET_TZ:
-        if (btnSet.wasReleased()) {
+        if ( btnSet.wasReleased() )
+        {
             DISP_STATE = SET_INTERVAL;
             tz = timezones[tzIndex];
             eeprom_update_byte( &ee_tzIndex, tzIndex );
@@ -498,12 +525,14 @@ void runDisplay(int tF10, int cpm)
             lcd.setCursor(0, 1);
             lcd << gmIntervals[gmIntervalIdx] << F(" minute") << ( (gmIntervals[gmIntervalIdx] > 1) ? "s  " : "   ");
         }
-        else if (btnUp.wasPressed()) {
+        else if ( btnUp.wasPressed() )
+        {
             if ( ++tzIndex >= sizeof(tzNames) / sizeof(tzNames[0]) ) tzIndex = 0;
             lcd.setCursor(0, 1);
             lcd << tzNames[tzIndex];
         }
-        else if (btnDn.wasPressed()) {
+        else if ( btnDn.wasPressed() )
+        {
             if ( --tzIndex >= sizeof(tzNames) / sizeof(tzNames[0]) ) tzIndex = sizeof(tzNames) / sizeof(tzNames[0]) - 1;
             lcd.setCursor(0, 1);
             lcd << tzNames[tzIndex];
@@ -511,7 +540,8 @@ void runDisplay(int tF10, int cpm)
         break;
 
     case SET_INTERVAL:
-        if (btnSet.wasReleased()) {
+        if ( btnSet.wasReleased() )
+        {
             DISP_STATE = SET_WDT;
             GEIGER.setInterval( gmIntervals[gmIntervalIdx] );
             eeprom_update_byte( &ee_gmIntervalIdx, gmIntervalIdx );
@@ -520,12 +550,14 @@ void runDisplay(int tF10, int cpm)
             lcd.setCursor(0, 1);
             lcd << (wdtEnable ? F("ON") : F("OFF"));
         }
-        else if (btnUp.wasPressed()) {
+        else if ( btnUp.wasPressed() )
+        {
             if ( ++gmIntervalIdx >= sizeof(gmIntervals) / sizeof(gmIntervals[0]) ) gmIntervalIdx = 0;
             lcd.setCursor(0, 1);
             lcd << gmIntervals[gmIntervalIdx] << F(" minute") << ( (gmIntervals[gmIntervalIdx] > 1) ? "s  " : "   ");
         }
-        else if (btnDn.wasPressed()) {
+        else if ( btnDn.wasPressed() )
+        {
             if ( --gmIntervalIdx >= sizeof(gmIntervals) / sizeof(gmIntervals[0]) ) gmIntervalIdx = sizeof(gmIntervals) / sizeof(gmIntervals[0]) - 1;
             lcd.setCursor(0, 1);
             lcd << gmIntervals[gmIntervalIdx] << F(" minute") << ( (gmIntervals[gmIntervalIdx] > 1) ? "s  " : "   ");
@@ -533,19 +565,23 @@ void runDisplay(int tF10, int cpm)
         break;
 
     case SET_WDT:
-        if (btnSet.wasReleased()) {
+        if ( btnSet.wasReleased() )
+        {
             DISP_STATE = DISP_CLOCK;
             lcd.clear();
             eeprom_update_byte( &ee_wdtEnable, wdtEnable );
             Serial << millis() << F(" Watchdog Timer ") << (wdtEnable ? F("ON\n") : F("OFF\n"));
-            if (wdtEnable) {
+            if (wdtEnable)
+            {
                 wdt_enable(WDTO_8S);
             }
-            else {
+            else
+            {
                 wdt_disable();
             }
         }
-        else if ( btnUp.wasPressed() || btnDn.wasPressed() ) {
+        else if ( btnUp.wasPressed() || btnDn.wasPressed() )
+        {
             wdtEnable = !wdtEnable;
             lcd.setCursor(0, 1);
             lcd << (wdtEnable ? F("ON ") : F("OFF"));
@@ -584,7 +620,8 @@ uint8_t showSockStatus()
 //    uint8_t rcr = W5100.readRCR();     //retry count
 //    Serial << F("RTR=") << rtr << F(" RCR=") << rcr << endl;
     
-    for (uint8_t i = 0; i < MAX_SOCK_NUM; i++) {
+    for (uint8_t i = 0; i < MAX_SOCK_NUM; i++)
+    {
         Serial << F("Sock_") << i;
         uint8_t s = W5100.readSnSR(i);
         socketStat[i] = s;
@@ -592,7 +629,8 @@ uint8_t showSockStatus()
         Serial << F(" 0x") << _HEX(s) << ' ' << W5100.readSnPORT(i) << F(" D:");
         uint8_t dip[4];
         W5100.readSnDIPR(i, dip);
-        for (uint8_t j = 0; j < 4; j++) {
+        for (uint8_t j = 0; j < 4; j++)
+        {
             Serial << dip[j];
             if (j < 3) Serial << '.';
         }
