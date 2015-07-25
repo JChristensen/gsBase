@@ -1,7 +1,7 @@
 //TO DO:  Review transmission timing (nextTransmit) and G-M timing.
 //        Add uptime stat -- DONE
 //        XBee.begin() is never called. -- FIXED.
-//        Diagnostic stats on/off, EEPROM parameter
+//        Diagnostic stats on/off as a parameter saved in EEPROM
 //        Base data: uptime, seq, temp, cpm, messages
 //        Diagnostic stats: success, fail, timeout, connTime, respTime, discTime, freeMem, RTC sets, sockets(?)
 //
@@ -161,6 +161,7 @@ void setup(void)
     //XBee initialization
     Serial.flush();
     if ( !XB.begin(Serial) ) XB.mcuReset(RESET_DELAY * 1000UL);    //reset if XBee initialization fails
+    XB.isTimeServer = true;
 
     //get geiger interval from eeprom and ensure that it's valid
     gmIntervalIdx = eeprom_read_byte( &ee_gmIntervalIdx );
@@ -193,7 +194,7 @@ void setup(void)
     lcd.setBacklight(HIGH);
 
     //RTC initialization
-    lcd << F("RTC SYNC");
+    lcd << F("RTC Sync");
     utc = RTC.get();                       //try to read the time from the RTC
     if ( utc == 0 )                        //couldn't read it, something wrong
     {
@@ -202,6 +203,7 @@ void setup(void)
         while (1);
     }
     RTC.squareWave(SQWAVE_1_HZ);           //1Hz interrupts for timekeeping
+    delay(1000);
 
     //get MAC address & display
     uint8_t mac[6];
@@ -214,23 +216,20 @@ void setup(void)
         if (mac[i] < 16) lcd << '0';
         lcd << _HEX( mac[i] );
     }
-    delay(1000);                           //allow some time for the ethernet chip to boot up
 
     //start Ethernet, display IP
-    Ethernet.begin(mac);                   //DHCP
+    if ( !Ethernet.begin(mac) )            //DHCP
+    {
+        Serial << millis() << F(" DHCP fail\n");
+        Serial.flush();
+        digitalWrite(WAIT_LED, HIGH);
+        GS.mcuReset(RESET_DELAY * 1000UL);
+    }
     Serial << millis() << F(" Ethernet started ") << Ethernet.localIP() << endl;
     lcd.clear();
     lcd << F("IP Address");
     lcd.setCursor(0, 1);
     lcd << Ethernet.localIP();
-    delay(1000);
-
-    //start NTP, display server IP
-    NTP.begin(NTP_POOL);
-    lcd.clear();
-    lcd << F("NTP Server");
-    lcd.setCursor(0, 1);
-    lcd << NTP.serverIP;
     delay(1000);
 
     //connect to GroveStreams, display IP
@@ -241,23 +240,89 @@ void setup(void)
     lcd << GS.serverIP;
     delay(1000);
 
-    lcd.clear();
-    lcd << F("NTP Sync...");
+    //initialization state machine
+    enum INIT_STATES_t { INIT_GS, INIT_WAIT_GS, INIT_WAIT_DISC, INIT_NTP, INIT_WAIT_NTP, INIT_COMPLETE };
+    INIT_STATES_t INIT_STATE = INIT_GS;
+    char buf[96];
+    unsigned long ms;
+    
+    while (1)
+    {
+        ethernetStatus_t gsStatus = GS.run();   //run the GroveStreams state machine
+        switch ( INIT_STATE)
+        {
+            //build reset message, send to GroveStreams
+            case INIT_GS:
+                strcpy(buf, "&msg=MCU%20reset%200x");
+                if (mcusr < 16) strcat(buf, "0");
+                itoa(mcusr, buf + strlen(buf), 16);
+                if (mcusr & _BV(WDRF))  strcat(buf, "%20WDRF");
+                if (mcusr & _BV(BORF))  strcat(buf, "%20BORF");
+                if (mcusr & _BV(EXTRF)) strcat(buf, "%20EXTRF");
+                if (mcusr & _BV(PORF))  strcat(buf, "%20PORF");
+                ms = millis();
+                GS.send(XB.compID, buf);
+                INIT_STATE = INIT_WAIT_GS;
+                break;
 
-    //set system time from RTC
-    utc = RTC.get();
-    while (utc == RTC.get()) delay(10);        //synchronize with the interrupts
-    utc = RTC.get();
-    while (utc == RTC.get()) delay(10);
-    utc = RTC.get();
-    NTP.setTime(utc);
-    Serial << millis() << F(" RTC set the system time: ");
-    printDateTime(utc, tzUTC);
-
-    geigerLED.begin(GM_PULSE_LED, PULSE_DUR);
+            case INIT_WAIT_GS:
+                if (gsStatus == HTTP_OK)
+                {
+                    ms = millis();
+                    INIT_STATE = INIT_WAIT_DISC;
+                }
+                else if ( millis() - ms >= 10000 )
+                {
+                    Serial << millis() << F(" GroveStreams send fail, resetting MCU\n");
+                    mcuReset();
+                }
+                break;
+                
+            case INIT_WAIT_DISC:
+                if (gsStatus == DISCONNECTED)
+                {
+                    Serial << millis() << F(" GS initialized\n");
+                    INIT_STATE = INIT_NTP;
+                }
+            
+                else if ( millis() - ms >= 10000 )
+                {
+                    Serial << millis() << F(" GroveStreams disc fail, resetting MCU\n");
+                    mcuReset();
+                }
+                break;
+        
+            case INIT_NTP:
+                //start NTP, display server IP
+                NTP.begin(NTP_POOL);
+                lcd.clear();
+                lcd << F("NTP Server");
+                lcd.setCursor(0, 1);
+                lcd << NTP.serverIP;
+                delay(1000);
+                //set system time from RTC
+                utc = RTC.get();
+                while (utc == RTC.get()) delay(10);        //synchronize with the interrupts
+//                utc = RTC.get();
+//                while (utc == RTC.get()) delay(10);
+                utc = RTC.get();
+                NTP.setTime(utc);
+                Serial << millis() << F(" RTC set the system time: ");
+                printDateTime(utc, tzUTC);
+                lcd.clear();
+                lcd << F("NTP Sync...");
+                geigerLED.begin(GM_PULSE_LED, PULSE_DUR);
+                INIT_STATE = INIT_COMPLETE;
+                break;
+                
+            case INIT_COMPLETE:
+                return;
+                break;
+        }
+    }
 }
 
-enum STATE_t { NTP_INIT, GS_INIT, RUN, RESET_WARN, RESET_WAIT } STATE;
+enum STATE_t { INIT, RUN, RESET_WARN, RESET_WAIT } STATE;
 
 void loop(void)
 {
@@ -285,11 +350,11 @@ void loop(void)
         {
             if ( GS.send(XB.sendingCompID, XB.payload) == SEND_ACCEPTED )
             {
-                Serial << F("\nPost OK\n");
+                Serial << F("\nSend OK\n");
             }
             else
             {
-                Serial << F("Post FAIL\n");
+                Serial << F("Send FAIL\n");
             }
         }
         else
@@ -337,42 +402,20 @@ void loop(void)
     switch (STATE)
     {
     static unsigned long msSend;
-
-    case NTP_INIT:
+        
+    case INIT:
         //wait until we have a good time from the NTP server
         if ( (ntpStatus == NTP_SYNC && NTP.lastSyncType == TYPE_PRECISE) || NTP.lastSyncType == TYPE_SKIPPED )
         {
             nextTimePrint = nextMinute();
-            nextTransmit = nextTimePrint + XB.txInterval * 60;
+            nextTransmit = utc - utc % (XB.txInterval * 60) + XB.txOffset * 60 + XB.txSec;
+            if ( nextTransmit <= utc ) nextTransmit += XB.txInterval * 60;
             startupTime = utc;
-            //build reset message, send to GroveStreams
-            strcpy(buf, "&msg=MCU%20reset%200x");
-            if (mcusr < 16) strcat(buf, "0");
-            itoa(mcusr, buf + strlen(buf), 16);
-            if (mcusr & _BV(WDRF))  strcat(buf, "%20WDRF");
-            if (mcusr & _BV(BORF))  strcat(buf, "%20BORF");
-            if (mcusr & _BV(EXTRF)) strcat(buf, "%20EXTRF");
-            if (mcusr & _BV(PORF))  strcat(buf, "%20PORF");
-            msSend = millis();
-            GS.send(XB.compID, buf);
             Serial << millis() << F(" NTP init\n");
-            STATE = GS_INIT;
-        }
-        break;
-        
-    case GS_INIT:
-        if (gsStatus == HTTP_OK)
-        {
-            Serial << millis() << F(" GS init\n");
             GEIGER.begin(gmIntervals[gmIntervalIdx], GM_POWER, utc);
             if (wdtEnable) wdt_enable(WDTO_8S);
             Serial << millis() << F(" Watchdog Timer ") << (wdtEnable ? F("ON\n") : F("OFF\n"));
             STATE = RUN;
-        }
-        else if ( millis() - msSend >= 10000 )
-        {
-            Serial << millis() << F(" GroveStreams send fail, resetting MCU\n");
-            mcuReset();
         }
         break;
 
@@ -416,11 +459,11 @@ void loop(void)
                 }
                 if ( GS.send(XB.compID, buf) == SEND_ACCEPTED )
                 {
-                    Serial << F("Post OK");
+                    Serial << F("Send OK");
                 }
                 else
                 {
-                    Serial << F("Post FAIL");
+                    Serial << F("Send FAIL");
                 }
                 Serial << F(" seq=") << GS.sendSeq << F(" tempF=") << tF10/10 << '.' << tF10%10 << F(" success=") << GS.httpOK << F(" fail=") << GS.connFail << F(" timeout=") << GS.recvTimeout;
                 Serial << F(" cnct=") << GS.connTime << F(" resp=") << GS.respTime << F(" disc=") << GS.discTime << F(" rtcSet=") << rtcSet << endl;
@@ -440,8 +483,7 @@ void loop(void)
                 printDateTime(local, tcr -> abbrev, false);
                 Serial << F(" Uptime: ") << buf << endl;
                 nextTimePrint += 60;
-//                uint8_t nSock = showSockStatus();
-//                Serial << F("Sockets available: ") << nSock << endl;
+                uint8_t nSock = showSockStatus();
                 //renew the DHCP lease hourly
                 if (utcM == 0 && utcS == 0)
                 {
