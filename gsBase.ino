@@ -54,9 +54,8 @@
 #include <Wire.h>                   //http://arduino.cc/en/Reference/Wire
 #include <XBee.h>                   //http://code.google.com/p/xbee-arduino/
 #include "classes.h"                //part of this project
-//#include "xbee.h"                   //part of this project
 
-//#define COUNT_LOOPS                 //count RUN state loops/sec
+#define COUNT_LOOPS                 //count RUN state loops/sec
 
 //pin assignments
 const uint8_t
@@ -83,6 +82,7 @@ bool wdtEnable;                     //wdt enable flag
 EEMEM uint8_t ee_wdtEnable;         //copy persisted in EEPROM
 const uint32_t RESET_DELAY(60);     //seconds before resetting the MCU for initialization failures
 const char* NTP_POOL = "pool.ntp.org";
+
 //object instantiations
 const char* gsServer = "grovestreams.com";
 PROGMEM const char gsApiKey[] = "cbc8d222-6f25-3e26-9f6e-edfc3364d7fd";
@@ -327,7 +327,8 @@ enum STATE_t { INIT, RUN, RESET_WARN, RESET_WAIT } STATE;
 void loop(void)
 {
 #ifdef COUNT_LOOPS
-    static uint16_t loopCount;
+    static uint32_t loopCount;
+    static uint32_t xbeeReads;
 #endif
     static char buf[96];
     static time_t utcLast;
@@ -342,15 +343,19 @@ void loop(void)
     utc = NTP.now();
     if (XB.read() == RX_DATA)
     {
-        char rss[8];
-        itoa(XB.rss, rss, 10);
-        strcat(XB.payload, "&rss=");
-        strcat(XB.payload, rss);
         if ( STATE == RUN )
         {
+            char rss[8];
+            itoa(XB.rss, rss, 10);
+            strcat(XB.payload, "&rss=");
+            strcat(XB.payload, rss);
             if ( GS.send(XB.sendingCompID, XB.payload) == SEND_ACCEPTED )
             {
-                Serial << F("\nSend OK\n");
+                Serial << millis() << F(" Send OK\n");
+#ifdef COUNT_LOOPS
+                Serial << millis() << F(" XBee reads=") << xbeeReads << endl;
+                xbeeReads = 0;
+#endif
             }
             else
             {
@@ -362,6 +367,13 @@ void loop(void)
             Serial << F("...ignored\n");
         }
     }
+#ifdef COUNT_LOOPS
+    else
+    {
+        ++xbeeReads;
+    }
+#endif
+    
     btnSet.read();
     btnUp.read();
     btnDn.read();
@@ -436,12 +448,6 @@ void loop(void)
             XB.sendTimeSync(utc);
             uint8_t utcM = minute(utc);
             uint8_t utcS = second(utc);
-#ifdef COUNT_LOOPS
-            Serial << millis() << ' ';
-            printTime(utc);
-            Serial << F(" loopCount=") << loopCount << endl;
-            loopCount = 0;
-#endif
 
             if (utc >= nextTransmit)          //time to send data?
             {
@@ -483,6 +489,12 @@ void loop(void)
                 printDateTime(local, tcr -> abbrev, false);
                 Serial << F(" Uptime: ") << buf << endl;
                 nextTimePrint += 60;
+#ifdef COUNT_LOOPS
+                Serial << millis() << ' ';
+                printTime(utc);
+                Serial << F("loopCount=") << loopCount << F(" SRAM=") << freeMemory() << endl;
+                loopCount = 0;
+#endif
                 uint8_t nSock = showSockStatus();
                 //renew the DHCP lease hourly
                 if (utcM == 0 && utcS == 0)
