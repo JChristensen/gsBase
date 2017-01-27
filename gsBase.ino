@@ -39,7 +39,7 @@
 // Function Set: ZigBee Coordinator API
 // Firmware Version 21A7
 // ID PAN ID 8059BEE5
-// DL Destination Address Low 0 (??)
+// DL Destination Address Low 0
 // NI Node Identifier GW1_10010005
 // NH Maximum Hops 1E
 // BD Baud Rate 115200 [7]
