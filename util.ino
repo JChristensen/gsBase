@@ -58,3 +58,12 @@ void timeSpan(char* buf, time_t span)
     sprintf( buf, "%lud%02ih%02im", span / SECS_PER_DAY, hour(span), minute(span) );
 }
 
+//adjust lcd brightness
+void brAdjust(void)
+{
+    static int pc;
+    pc = brightness.reading(analogRead(PHOTO_PIN));
+    int br = map(constrain(pc, 50, 550), 50, 550, 10, 1);
+    analogWrite(LCD_BL, br * 255 / 10);
+}
+

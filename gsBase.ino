@@ -34,6 +34,19 @@
 
 //Set fuses: E:FD, H:D6, L:FF (preserve EEPROM thru chip erase)
 
+// XBee Configuration
+// Product Family: XB24-ZB
+// Function Set: ZigBee Coordinator API
+// Firmware Version 21A7
+// ID PAN ID 8059BEE5
+// DL Destination Address Low 0 (??)
+// NI Node Identifier GW1_10010005
+// NH Maximum Hops 1E
+// BD Baud Rate 115200 [7]
+// AP API Enable 2
+// SP Cyclic Sleep Period 7D0
+// SN Number of Cyclic Sleep Periods 14
+
 #include <avr/eeprom.h>
 #include <utility/w5100.h>
 #include <Button.h>                 //http://github.com/JChristensen/Button
@@ -42,9 +55,8 @@
 #include <extEEPROM.h>              //http://github.com/JChristensen/extEEPROM
 #include <GroveStreams.h>           //http://github.com/JChristensen/GroveStreams
 #include <gsXBee.h>
-#include <LiquidTWI.h>              //http://forums.adafruit.com/viewtopic.php?t=21586
-//also                              //http://dl.dropboxusercontent.com/u/35284720/postfiles/LiquidTWI-1.5.1.zip
-#include <MCP980X.h>                //http://github.com/JChristensen/MCP980X
+#include <LiquidCrystal.h>          //http://arduino.cc/en/Reference/LiquidCrystal (included with Arduino IDE)
+#include <MCP9808.h>                //http://github.com/JChristensen/MCP980X
 #include <MemoryFree.h>             //http://playground.arduino.cc/Code/AvailableMemory
 #include <movingAvg.h>              //http://github.com/JChristensen/movingAvg
 #include <NTP.h>
@@ -60,17 +72,25 @@
 
 //pin assignments
 const uint8_t
+    WIZ_RESET(0),                   //WIZnet module reset pin
+    GM_POWER(1),                    //geiger power enable
     RTC_1HZ(2),                     //RTC 1Hz interrupt, INT2
-    GM_INPUT(10),                   //G-M pulse interrupt, INT0
-    WIZ_RESET(12),                  //WIZnet module reset
-    HB_LED(13),                     //heartbeat LED
-    NTP_LED(14),                    //ntp time sync
-    WAIT_LED(15),                   //waiting for server response
-    GM_PULSE_LED(18),               //blink on pulse from G-M counter
-    SET_BUTTON(19),                 //set button
-    UP_BUTTON(20),                  //up button
-    DN_BUTTON(21),                  //down button
-    GM_POWER(22);                   //geiger power enable
+    LCD_BL(3),                      //LCD backlight
+    GM_INPUT(10),                   //geiger pulse input
+    HB_LED(12),                     //heartbeat LED
+    WAIT_LED(13),                   //waiting for server response
+    NTP_LED(14),                    //waiting for NTP server response
+    GM_PULSE_LED(15),               //blink on pulse from G-M counter
+    LCD_D4(18),                     //LCD control lines
+    LCD_D5(19),
+    LCD_D6(20),
+    LCD_D7(21),
+    LCD_EN(22),
+    LCD_RS(23),
+    PHOTO_PIN(A0),                  //photocell
+    DN_BUTTON(A5),                  //down button
+    UP_BUTTON(A6),                  //up button
+    SET_BUTTON(A7);                 //set button
 
 //global variables
 time_t utc, local;                  //current times
@@ -89,9 +109,10 @@ const char* gsServer = "grovestreams.com";
 PROGMEM const char gsApiKey[] = "cbc8d222-6f25-3e26-9f6e-edfc3364d7fd";
 GroveStreams GS(gsServer, (const __FlashStringHelper *) gsApiKey, WAIT_LED);
 ntpClass NTP(NTP_LED);
-MCP980X mcp9802(0);
+MCP9808 mcp9808(0);
 movingAvg avgTemp;
-LiquidTWI lcd(0); //i2c address 0 (0x20)
+movingAvg brightness;
+LiquidCrystal lcd(LCD_RS, LCD_EN, LCD_D4, LCD_D5, LCD_D6, LCD_D7);
 extEEPROM eep(kbits_2, 1, 8);
 const unsigned long PULSE_DUR(50);  //blink duration for the G-M one-shot LED, ms
 oneShotLED geigerLED;
@@ -143,11 +164,16 @@ void wdt_init(void)
 void setup(void)
 {
     //pin inits
-    pinMode(RTC_1HZ, INPUT_PULLUP);
     pinMode(WIZ_RESET, OUTPUT);
+    pinMode(GM_POWER, OUTPUT);
+    pinMode(RTC_1HZ, INPUT_PULLUP);
+    pinMode(LCD_BL, OUTPUT);
+    pinMode(GM_INPUT, INPUT_PULLUP);
     pinMode(HB_LED, OUTPUT);
     pinMode(WAIT_LED, OUTPUT);
-    pinMode(GM_INPUT, INPUT_PULLUP);
+    pinMode(NTP_LED, OUTPUT);
+    pinMode(GM_PULSE_LED, OUTPUT);
+    pinMode(PHOTO_PIN, INPUT_PULLUP);
 
     //report the reset source
     Serial.begin(115200);
@@ -187,12 +213,11 @@ void setup(void)
     //device inits
     delay(1);
     digitalWrite(WIZ_RESET, HIGH);
-    mcp9802.begin();
+    mcp9808.begin(MCP9808::twiClock400kHz);
+    eep.begin(extEEPROM::twiClock400kHz);
     lcd.begin(16, 2);
-    eep.begin(twiClock400kHz);
-    mcp9802.writeConfig(ADC_RES_12BITS);
     lcd.clear();
-    lcd.setBacklight(HIGH);
+    digitalWrite(LCD_BL, HIGH);
 
     //RTC initialization
     lcd << F("RTC Sync");
@@ -451,6 +476,8 @@ void loop(void)
             XB.sendTimeSync(utc);
             uint8_t utcM = minute(utc);
             uint8_t utcS = second(utc);
+            brAdjust();
+            digitalWrite(HB_LED, !(utcS & 1));    //run the heartbeat LED
 
             if (utc >= nextTransmit)          //time to send data?
             {
@@ -478,11 +505,14 @@ void loop(void)
                 Serial << F(" cnct=") << GS.connTime << F(" resp=") << GS.respTime << F(" disc=") << GS.discTime << F(" rtcSet=") << rtcSet << endl;
             }
 
-            digitalWrite(HB_LED, !(utcS & 1));    //run the heartbeat LED
-
             if ( utcS % 10 == 0 )                 //read temperature every 10 sec
             {
-                tF10 = avgTemp.reading( mcp9802.readTempF10(AMBIENT) );
+                mcp9808.read();
+                long f160 = (long)mcp9808.tAmbient * 18L;
+                int f10 = f160 / 16;
+                if ((f160 & 15) >= 8) ++f10;    //round up to the next tenth if needed
+                f10 += 320;  
+                tF10 = avgTemp.reading(f10);
             }
 
             if (utc >= nextTimePrint)             //print time to Serial once per minute
@@ -695,3 +725,4 @@ uint8_t showSockStatus()
     }
     return nAvailable;
 }
+
