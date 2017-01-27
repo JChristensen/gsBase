@@ -1,4 +1,5 @@
 //TO DO:  Review transmission timing (nextTransmit) and G-M timing.
+//        Print RTC time to Serial log early during startup. -- DONE.
 //        Add uptime stat -- DONE
 //        XBee.begin() is never called. -- FIXED.
 //        Diagnostic stats on/off as a parameter saved in EEPROM
@@ -202,6 +203,8 @@ void setup(void)
         digitalWrite( WAIT_LED, HIGH);
         while (1);
     }
+    Serial << millis() << F(" RTC Time ");
+    printDateTime(utc, tzUTC);
     RTC.squareWave(SQWAVE_1_HZ);           //1Hz interrupts for timekeeping
     delay(1000);
 
@@ -423,7 +426,7 @@ void loop(void)
             nextTransmit = utc - utc % (XB.txInterval * 60) + XB.txOffset * 60 + XB.txSec;
             if ( nextTransmit <= utc ) nextTransmit += XB.txInterval * 60;
             startupTime = utc;
-            Serial << millis() << F(" NTP init\n");
+            Serial << millis() << F(" NTP initialized\n");
             GEIGER.begin(gmIntervals[gmIntervalIdx], GM_POWER, utc);
             if (wdtEnable) wdt_enable(WDTO_8S);
             Serial << millis() << F(" Watchdog Timer ") << (wdtEnable ? F("ON\n") : F("OFF\n"));
