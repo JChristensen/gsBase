@@ -387,12 +387,12 @@ void loop(void)
             }
             else
             {
-                Serial << F("Send FAIL\n");
+                Serial << millis() << F("Send FAIL\n");
             }
         }
         else
         {
-            Serial << F("...ignored\n");
+            Serial << millis() << F("...ignored\n");
         }
     }
 #ifdef COUNT_LOOPS
@@ -495,11 +495,11 @@ void loop(void)
                 }
                 if ( GS.send(XB.compID, buf) == SEND_ACCEPTED )
                 {
-                    Serial << F("Send OK");
+                    Serial << millis() << F("Send OK");
                 }
                 else
                 {
-                    Serial << F("Send FAIL");
+                    Serial << millis() << F("Send FAIL");
                 }
                 Serial << F(" seq=") << GS.sendSeq << F(" tempF=") << tF10/10 << '.' << tF10%10 << F(" success=") << GS.httpOK << F(" fail=") << GS.connFail << F(" timeout=") << GS.recvTimeout;
                 Serial << F(" cnct=") << GS.connTime << F(" resp=") << GS.respTime << F(" disc=") << GS.discTime << F(" rtcSet=") << rtcSet << endl;
