@@ -42,7 +42,7 @@
 // DL Destination Address Low 0
 // NI Node Identifier GW1_10010005
 // NH Maximum Hops 1E
-// BD Baud Rate 115200 [7]
+// BD Baud Rate 115200 [7], testing with 38400 [5]
 // AP API Enable 2
 // SP Cyclic Sleep Period 7D0
 // SN Number of Cyclic Sleep Periods 14
@@ -92,7 +92,7 @@ const uint8_t
     UP_BUTTON(A6),                  //up button
     SET_BUTTON(A7);                 //set button
 
-//global variables
+//global variables & constants
 time_t utc, local;                  //current times
 time_t startupTime;                 //sketch start time
 uint8_t gmIntervalIdx;              //index to geiger sample interval array
@@ -103,6 +103,7 @@ bool wdtEnable;                     //wdt enable flag
 EEMEM uint8_t ee_wdtEnable;         //copy persisted in EEPROM
 const uint32_t RESET_DELAY(60);     //seconds before resetting the MCU for initialization failures
 const char* NTP_POOL = "pool.ntp.org";
+const int32_t baudRate(38400);      //serial baud rate
 
 //object instantiations
 const char* gsServer = "grovestreams.com";
@@ -176,7 +177,7 @@ void setup(void)
     pinMode(PHOTO_PIN, INPUT_PULLUP);
 
     //report the reset source
-    Serial.begin(115200);
+    Serial.begin(baudRate);
     Serial << F( "\n" __FILE__ " " __DATE__ " " __TIME__ "\n" );
     Serial << F("MCU reset 0x0") << _HEX(mcusr);
     if (mcusr & _BV(WDRF))  Serial << F(" WDRF");
@@ -387,12 +388,12 @@ void loop(void)
             }
             else
             {
-                Serial << millis() << F("Send FAIL\n");
+                Serial << millis() << F(" Send FAIL\n");
             }
         }
         else
         {
-            Serial << millis() << F("...ignored\n");
+            Serial << millis() << F(" ...ignored\n");
         }
     }
 #ifdef COUNT_LOOPS
@@ -495,11 +496,11 @@ void loop(void)
                 }
                 if ( GS.send(XB.compID, buf) == SEND_ACCEPTED )
                 {
-                    Serial << millis() << F("Send OK");
+                    Serial << millis() << F(" Send OK");
                 }
                 else
                 {
-                    Serial << millis() << F("Send FAIL");
+                    Serial << millis() << F(" Send FAIL");
                 }
                 Serial << F(" seq=") << GS.sendSeq << F(" tempF=") << tF10/10 << '.' << tF10%10 << F(" success=") << GS.httpOK << F(" fail=") << GS.connFail << F(" timeout=") << GS.recvTimeout;
                 Serial << F(" cnct=") << GS.connTime << F(" resp=") << GS.respTime << F(" disc=") << GS.discTime << F(" rtcSet=") << rtcSet << endl;
@@ -528,7 +529,7 @@ void loop(void)
                 Serial << F("loopCount=") << loopCount << F(" SRAM=") << freeMemory() << endl;
                 loopCount = 0;
 #endif
-                uint8_t nSock = showSockStatus();
+                //uint8_t nSock = showSockStatus();
                 //renew the DHCP lease hourly
                 if (utcM == 0 && utcS == 0)
                 {
