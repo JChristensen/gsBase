@@ -2,7 +2,7 @@
 
 // geiger and oneShotLED classes
 
-#include <util/Atomic.h>
+#include <util/atomic.h>
 #include <Arduino.h>
 #include <Time.h>
 #include <Streaming.h>    //http://arduiniana.org/libraries/streaming/
@@ -194,4 +194,3 @@ void oneShotLED::on(void)
     _msOn = millis();
     digitalWrite(_pin, HIGH);
 }
-

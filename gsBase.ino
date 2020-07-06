@@ -48,10 +48,10 @@
 // SN Number of Cyclic Sleep Periods 14
 
 #include <avr/eeprom.h>
-#include <utility/w5100.h>
-#include <Button.h>                 //http://github.com/JChristensen/Button
+#include <JC_Button.h>              //http://github.com/JChristensen/Button
 #include <DS3232RTC.h>              //http://github.com/JChristensen/DS3232RTC
 #include <Ethernet.h>               //http://arduino.cc/en/Reference/Ethernet
+#include <utility/w5100.h>
 #include <extEEPROM.h>              //http://github.com/JChristensen/extEEPROM
 #include <GroveStreams.h>           //http://github.com/JChristensen/GroveStreams
 #include <gsXBee.h>
@@ -111,8 +111,8 @@ PROGMEM const char gsApiKey[] = "cbc8d222-6f25-3e26-9f6e-edfc3364d7fd";
 GroveStreams GS(gsServer, (const __FlashStringHelper *) gsApiKey, WAIT_LED);
 ntpClass NTP(NTP_LED);
 MCP9808 mcp9808(0);
-movingAvg avgTemp;
-movingAvg brightness;
+movingAvg avgTemp(6);
+movingAvg brightness(6);
 LiquidCrystal lcd(LCD_RS, LCD_EN, LCD_D4, LCD_D5, LCD_D6, LCD_D7);
 extEEPROM eep(kbits_2, 1, 8);
 const unsigned long PULSE_DUR(50);  //blink duration for the G-M one-shot LED, ms
@@ -278,7 +278,7 @@ void setup(void)
     while (1)
     {
         ethernetStatus_t gsStatus = GS.run();   //run the GroveStreams state machine
-        switch ( INIT_STATE)
+        switch (INIT_STATE)
         {
             //build reset message, send to GroveStreams
             case INIT_GS:
@@ -726,4 +726,3 @@ uint8_t showSockStatus()
     }
     return nAvailable;
 }
-
