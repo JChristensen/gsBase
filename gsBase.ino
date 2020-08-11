@@ -119,12 +119,9 @@ const unsigned long PULSE_DUR(50);  //blink duration for the G-M one-shot LED, m
 oneShotLED geigerLED;
 gsXBee XB;
 
-const bool PULLUP(true);
-const bool INVERT(true);
-const unsigned long DEBOUNCE_MS(25);
-Button btnSet(SET_BUTTON, PULLUP, INVERT, DEBOUNCE_MS);
-Button btnUp(UP_BUTTON, PULLUP, INVERT, DEBOUNCE_MS);
-Button btnDn(DN_BUTTON, PULLUP, INVERT, DEBOUNCE_MS);
+Button btnSet(SET_BUTTON);
+Button btnUp(UP_BUTTON);
+Button btnDn(DN_BUTTON);
 
 //Continental US Time Zones
 TimeChangeRule EDT = { "EDT", Second, Sun, Mar, 2, -240 };    //Daylight time = UTC - 4 hours
@@ -219,6 +216,11 @@ void setup(void)
     lcd.begin(16, 2);
     lcd.clear();
     digitalWrite(LCD_BL, HIGH);
+    btnSet.begin();
+    btnUp.begin();
+    btnDn.begin();
+    avgTemp.begin();
+    brightness.begin();
 
     //RTC initialization
     lcd << F("RTC Sync");
@@ -270,11 +272,11 @@ void setup(void)
     delay(1000);
 
     //initialization state machine
-    enum INIT_STATES_t { INIT_GS, INIT_WAIT_GS, INIT_WAIT_DISC, INIT_NTP, INIT_WAIT_NTP, INIT_COMPLETE };
+    enum INIT_STATES_t { INIT_GS, INIT_WAIT_GS, INIT_WAIT_DISC, INIT_NTP, INIT_COMPLETE };
     INIT_STATES_t INIT_STATE = INIT_GS;
     char buf[96];
     unsigned long ms;
-    
+
     while (1)
     {
         ethernetStatus_t gsStatus = GS.run();   //run the GroveStreams state machine
@@ -306,21 +308,21 @@ void setup(void)
                     mcuReset();
                 }
                 break;
-                
+
             case INIT_WAIT_DISC:
                 if (gsStatus == DISCONNECTED)
                 {
                     Serial << millis() << F(" GS initialized\n");
                     INIT_STATE = INIT_NTP;
                 }
-            
+
                 else if ( millis() - ms >= 10000 )
                 {
                     Serial << millis() << F(" GroveStreams disc fail, resetting MCU\n");
                     mcuReset();
                 }
                 break;
-        
+
             case INIT_NTP:
                 //start NTP, display server IP
                 NTP.begin(NTP_POOL);
@@ -343,7 +345,7 @@ void setup(void)
                 geigerLED.begin(GM_PULSE_LED, PULSE_DUR);
                 INIT_STATE = INIT_COMPLETE;
                 break;
-                
+
             case INIT_COMPLETE:
                 return;
                 break;
@@ -402,7 +404,7 @@ void loop(void)
         ++xbeeReads;
     }
 #endif
-    
+
     btnSet.read();
     btnUp.read();
     btnDn.read();
@@ -443,7 +445,7 @@ void loop(void)
     switch (STATE)
     {
     static unsigned long msSend;
-        
+
     case INIT:
         //wait until we have a good time from the NTP server
         if ( (ntpStatus == NTP_SYNC && NTP.lastSyncType == TYPE_PRECISE) || NTP.lastSyncType == TYPE_SKIPPED )
@@ -512,7 +514,7 @@ void loop(void)
                 long f160 = (long)mcp9808.tAmbient * 18L;
                 int f10 = f160 / 16;
                 if ((f160 & 15) >= 8) ++f10;    //round up to the next tenth if needed
-                f10 += 320;  
+                f10 += 320;
                 tF10 = avgTemp.reading(f10);
             }
 
@@ -703,11 +705,11 @@ uint8_t showSockStatus()
 {
     uint8_t socketStat[MAX_SOCK_NUM];
     uint8_t nAvailable = 0;
-    
+
 //    uint16_t rtr = W5100.readRTR();    //retry time
 //    uint8_t rcr = W5100.readRCR();     //retry count
 //    Serial << F("RTR=") << rtr << F(" RCR=") << rcr << endl;
-    
+
     for (uint8_t i = 0; i < MAX_SOCK_NUM; i++)
     {
         Serial << F("Sock_") << i;

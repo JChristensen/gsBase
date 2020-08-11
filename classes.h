@@ -82,7 +82,7 @@ bool geiger::run(int* count, time_t utc)
             Serial << F(" G-M wait, next sample: ");
             printDateTime(_nextSampleTime, tzUTC);
             break;
-    
+
         case gmWAIT:
             if (utc >= _nextSampleTime - XB.txWarmup)
             {
@@ -92,7 +92,7 @@ bool geiger::run(int* count, time_t utc)
                 Serial << F(" G-M warmup, power on\n");
             }
             break;
-    
+
         case gmWARMUP:
             if (utc >= _nextSampleTime)
             {
@@ -108,7 +108,7 @@ bool geiger::run(int* count, time_t utc)
                 EIMSK |= _BV(INT0);                  //enable the interrupt
             }
             break;
-    
+
         case gmCOLLECT:
             if (utc >= _nextSampleTime + 60)
             {
@@ -128,7 +128,7 @@ bool geiger::run(int* count, time_t utc)
                 ret = true;
             }
             break;
-    
+
         case gmCONTINUOUS:
             if (utc >= _nextSampleTime + 60)
             {
