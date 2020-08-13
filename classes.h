@@ -24,8 +24,7 @@ class geiger
     public:
         void begin(int sampleInterval, uint8_t powerPin, time_t utc);
         bool run(int* count, time_t utc);
-        bool pulse(void);
-        int count(void);
+        bool pulse();
         void setInterval(int sampleInterval);
 
     private:
@@ -43,8 +42,7 @@ void geiger::begin(int sampleInterval, uint8_t powerPin, time_t utc)
 {
     EICRA |= _BV(ISC01);                 //INT0 on falling edge
     EIFR |= _BV(INTF0);                  //ensure interrupt flag is cleared (setting ISC bits can set it)
-    ATOMIC_BLOCK(ATOMIC_RESTORESTATE)
-    {
+    ATOMIC_BLOCK(ATOMIC_RESTORESTATE) {
         _count = 0;
         _pulse = false;
     }
@@ -69,10 +67,8 @@ bool geiger::run(int* count, time_t utc)
 {
     bool ret = false;
 
-    if (_started)
-    {
-        switch (gmState)
-        {
+    if (_started) {
+        switch (gmState) {
         case gmINIT:
             gmState = gmWAIT;
             digitalWrite(_powerPin, LOW);   //if interval is changed while collect is in progress, it gets aborted, so ensure the power is turned off here
@@ -84,8 +80,7 @@ bool geiger::run(int* count, time_t utc)
             break;
 
         case gmWAIT:
-            if (utc >= _nextSampleTime - XB.txWarmup)
-            {
+            if (utc >= _nextSampleTime - XB.txWarmup) {
                 gmState = gmWARMUP;
                 digitalWrite(_powerPin, HIGH);
                 printDateTime(utc, tzUTC, false);
@@ -94,8 +89,7 @@ bool geiger::run(int* count, time_t utc)
             break;
 
         case gmWARMUP:
-            if (utc >= _nextSampleTime)
-            {
+            if (utc >= _nextSampleTime) {
                 gmState = _continuous ? gmCONTINUOUS : gmCOLLECT;
                 printDateTime(utc, tzUTC, false);
                 Serial << F(" G-M collect\n");
@@ -110,11 +104,9 @@ bool geiger::run(int* count, time_t utc)
             break;
 
         case gmCOLLECT:
-            if (utc >= _nextSampleTime + 60)
-            {
+            if (utc >= _nextSampleTime + 60) {
                 EIMSK &= ~_BV(INT0);                 //disable the interrupt
-                ATOMIC_BLOCK(ATOMIC_RESTORESTATE)
-                {
+                ATOMIC_BLOCK(ATOMIC_RESTORESTATE) {
                     *count = _count;
                     _count = 0;
                     _pulse = false;
@@ -130,10 +122,8 @@ bool geiger::run(int* count, time_t utc)
             break;
 
         case gmCONTINUOUS:
-            if (utc >= _nextSampleTime + 60)
-            {
-                ATOMIC_BLOCK(ATOMIC_RESTORESTATE)
-                {
+            if (utc >= _nextSampleTime + 60) {
+                ATOMIC_BLOCK(ATOMIC_RESTORESTATE) {
                     *count = _count;
                     _count = 0;
                     _pulse = false;
@@ -151,12 +141,11 @@ bool geiger::run(int* count, time_t utc)
 }
 
 //return true if a pulse was detected since last call
-bool geiger::pulse(void)
+bool geiger::pulse()
 {
     bool p;
 
-    ATOMIC_BLOCK(ATOMIC_RESTORESTATE)
-    {
+    ATOMIC_BLOCK(ATOMIC_RESTORESTATE) {
         if ( (p = _pulse) ) _pulse = false;
     }
     return p;
@@ -168,8 +157,8 @@ class oneShotLED
 {
     public:
         void begin(uint8_t pin, unsigned long duration);
-        void run(void);
-        void on(void);
+        void run();
+        void on();
 
     private:
         uint8_t _pin;
@@ -184,12 +173,12 @@ void oneShotLED::begin(uint8_t pin, unsigned long duration)
     pinMode(_pin, OUTPUT);
 }
 
-void oneShotLED::run(void)
+void oneShotLED::run()
 {
     if (millis() - _msOn >= _dur) digitalWrite(_pin, LOW);
 }
 
-void oneShotLED::on(void)
+void oneShotLED::on()
 {
     _msOn = millis();
     digitalWrite(_pin, HIGH);
