@@ -67,6 +67,7 @@
 #include <Wire.h>                   //http://arduino.cc/en/Reference/Wire
 #include <XBee.h>                   //http://code.google.com/p/xbee-arduino/
 #include "classes.h"                //part of this project
+#include "mqtt_mailer.h"            //part of this project
 
 //#define COUNT_LOOPS                 //count RUN state loops/sec
 
@@ -105,6 +106,12 @@ const uint32_t RESET_DELAY(60);     //seconds before resetting the MCU for initi
 const char* NTP_POOL = "pool.ntp.org";
 const int32_t baudRate(57600);      //serial baud rate
 
+// mqtt constants
+const char emailTo[] = "christensen.jack.a@gmail.com";  // email address to send to
+const char mqttBroker[] = "zw1";                        // mqtt broker hostname
+const char clientID[] = "gw2";                          // unique ID for this client
+const char pubTopic[] = "sendmail";                     // mqtt publish topic
+
 //object instantiations
 const char* gsServer = "grovestreams.com";
 PROGMEM const char gsApiKey[] = "cbc8d222-6f25-3e26-9f6e-edfc3364d7fd";
@@ -118,6 +125,8 @@ extEEPROM eep(kbits_2, 1, 8);
 const unsigned long PULSE_DUR(50);  //blink duration for the G-M one-shot LED, ms
 oneShotLED geigerLED;
 gsXBee XB;
+EthernetClient ethClient;
+MQTT_Mailer mailer(ethClient, clientID);
 
 Button btnSet(SET_BUTTON);
 Button btnUp(UP_BUTTON);
@@ -419,8 +428,9 @@ void loop()
         STATE = RESET_WARN;
     }
 
-    ethernetStatus_t gsStatus = GS.run();   //run the GroveStreams state machine
-    runDisplay(tF10, cpm);                  //run the LCD display
+    ethernetStatus_t gsStatus = GS.run();   // run the GroveStreams state machine
+    if (STATE == RUN) mailer.run();         // run the mqtt mailer
+    runDisplay(tF10, cpm);                  // run the LCD display
 
     switch (STATE) {
     static unsigned long msSend;
@@ -434,6 +444,8 @@ void loop()
             startupTime = utc;
             Serial << millis() << F(" NTP initialized\n");
             GEIGER.begin(gmIntervals[gmIntervalIdx], GM_POWER, utc);
+            mailer.setServer(mqttBroker, 1883);
+            mailer.setTopic(pubTopic);
             if (wdtEnable) wdt_enable(WDTO_8S);
             Serial << millis() << F(" Watchdog Timer ") << (wdtEnable ? F("ON\n") : F("OFF\n"));
             STATE = RUN;
@@ -470,6 +482,12 @@ void loop()
                     strcat(buf, "&b=");
                     strcat(buf, aBuf);
                     haveCPM = false;
+
+                    // send cpm via mqtt
+                    static char mqttBuf[20];
+                    strcpy(mqttBuf, "[Geiger] CPM=");
+                    strcat(mqttBuf, aBuf);
+                    mailer.sendmail(emailTo, mqttBuf, mqttBuf);
                 }
                 if ( GS.send(XB.compID, buf) == SEND_ACCEPTED ) {
                     Serial << millis() << F(" Send OK");
