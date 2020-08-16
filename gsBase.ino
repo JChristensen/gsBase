@@ -59,6 +59,7 @@
 #include <MCP9808.h>                //http://github.com/JChristensen/MCP980X
 #include <MemoryFree.h>             //http://playground.arduino.cc/Code/AvailableMemory
 #include <movingAvg.h>              //http://github.com/JChristensen/movingAvg
+#include <MQTT_Mailer.h>            //https://github.com/JChristensen/MQTT_Mailer
 #include <NTP.h>
 #include <SPI.h>                    //http://arduino.cc/en/Reference/SPI
 #include <Streaming.h>              //http://arduiniana.org/libraries/streaming/
@@ -67,7 +68,6 @@
 #include <Wire.h>                   //http://arduino.cc/en/Reference/Wire
 #include <XBee.h>                   //http://code.google.com/p/xbee-arduino/
 #include "classes.h"                //part of this project
-#include "mqtt_mailer.h"            //part of this project
 
 //#define COUNT_LOOPS                 //count RUN state loops/sec
 
@@ -105,29 +105,29 @@ EEMEM uint8_t ee_wdtEnable;         //copy persisted in EEPROM
 const uint32_t RESET_DELAY(60);     //seconds before resetting the MCU for initialization failures
 const char* NTP_POOL = "pool.ntp.org";
 const int32_t baudRate(57600);      //serial baud rate
+const char* gsServer = "grovestreams.com";
+PROGMEM const char gsApiKey[] = "cbc8d222-6f25-3e26-9f6e-edfc3364d7fd";
+const unsigned long PULSE_DUR(50);  //blink duration for the G-M one-shot LED, ms
 
 // mqtt constants
 const char emailTo[] = "8108778656@msg.fi.google.com";  // email address to send to
-//const char emailTo[] = "christensen.jack.a@gmail.com";  // email address to send to
 const char mqttBroker[] = "zw1";                        // mqtt broker hostname
 const char clientID[] = "gw2";                          // unique ID for this client
 const char pubTopic[] = "sendmail";                     // mqtt publish topic
 
 //object instantiations
-const char* gsServer = "grovestreams.com";
-PROGMEM const char gsApiKey[] = "cbc8d222-6f25-3e26-9f6e-edfc3364d7fd";
-GroveStreams GS(gsServer, (const __FlashStringHelper *) gsApiKey, WAIT_LED);
+EthernetClient gsClient;
+EthernetClient mqttClient;
+GroveStreams GS(gsClient, gsServer, (const __FlashStringHelper *) gsApiKey, WAIT_LED);
+MQTT_Mailer mailer(mqttClient, clientID);
 ntpClass NTP(NTP_LED);
 MCP9808 mcp9808(0);
 movingAvg avgTemp(6);
 movingAvg brightness(6);
 LiquidCrystal lcd(LCD_RS, LCD_EN, LCD_D4, LCD_D5, LCD_D6, LCD_D7);
 extEEPROM eep(kbits_2, 1, 8);
-const unsigned long PULSE_DUR(50);  //blink duration for the G-M one-shot LED, ms
 oneShotLED geigerLED;
 gsXBee XB;
-EthernetClient ethClient;
-MQTT_Mailer mailer(ethClient, clientID);
 
 Button btnSet(SET_BUTTON);
 Button btnUp(UP_BUTTON);
@@ -445,8 +445,7 @@ void loop()
             startupTime = utc;
             Serial << millis() << F(" NTP initialized\n");
             GEIGER.begin(gmIntervals[gmIntervalIdx], GM_POWER, utc);
-            mailer.setServer(mqttBroker, 1883);
-            mailer.setTopic(pubTopic);
+            mailer.begin(mqttBroker, 1883, pubTopic);
             if (wdtEnable) wdt_enable(WDTO_8S);
             Serial << millis() << F(" Watchdog Timer ") << (wdtEnable ? F("ON\n") : F("OFF\n"));
             STATE = RUN;
@@ -515,7 +514,7 @@ void loop()
                 timeSpan(buf, utc - startupTime);
                 Serial << endl << millis() << F(" Local: ");
                 printDateTime(local, tcr -> abbrev, false);
-                Serial << F(" Uptime: ") << buf << endl;
+                Serial << F(" Uptime: ") << buf << F(" SRAM=") << freeMemory() << endl;
                 nextTimePrint += 60;
 #ifdef COUNT_LOOPS
                 Serial << millis() << ' ';
