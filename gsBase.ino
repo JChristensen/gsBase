@@ -107,7 +107,8 @@ const char* NTP_POOL = "pool.ntp.org";
 const int32_t baudRate(57600);      //serial baud rate
 
 // mqtt constants
-const char emailTo[] = "christensen.jack.a@gmail.com";  // email address to send to
+const char emailTo[] = "8108778656@msg.fi.google.com";  // email address to send to
+//const char emailTo[] = "christensen.jack.a@gmail.com";  // email address to send to
 const char mqttBroker[] = "zw1";                        // mqtt broker hostname
 const char clientID[] = "gw2";                          // unique ID for this client
 const char pubTopic[] = "sendmail";                     // mqtt publish topic
@@ -483,11 +484,13 @@ void loop()
                     strcat(buf, aBuf);
                     haveCPM = false;
 
-                    // send cpm via mqtt
-                    static char mqttBuf[20];
-                    strcpy(mqttBuf, "[Geiger] CPM=");
-                    strcat(mqttBuf, aBuf);
-                    mailer.sendmail(emailTo, mqttBuf, mqttBuf);
+                    // send cpm via mqtt if too high
+                    if (cpm >= 40) {
+                        static char mqttBuf[20];
+                        strcpy(mqttBuf, "[Geiger] CPM=");
+                        strcat(mqttBuf, aBuf);
+                        mailer.sendmail(emailTo, mqttBuf, mqttBuf);
+                    }
                 }
                 if ( GS.send(XB.compID, buf) == SEND_ACCEPTED ) {
                     Serial << millis() << F(" Send OK");
