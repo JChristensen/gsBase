@@ -111,7 +111,7 @@ const unsigned long PULSE_DUR(50);  //blink duration for the G-M one-shot LED, m
 
 // mqtt constants
 const char emailTo[] = "8108778656@msg.fi.google.com";  // email address to send to
-const char mqttBroker[] = "zw1";                        // mqtt broker hostname
+const char mqttBroker[] = "z1";                        // mqtt broker hostname
 const char clientID[] = "gw2";                          // unique ID for this client
 const char pubTopic[] = "sendmail";                     // mqtt publish topic
 
@@ -158,8 +158,8 @@ extern const char* tzUTC;
 
 //trap the MCUSR value after reset to determine the reset source
 //and ensure the watchdog is reset. this code does not work with a bootloader.
-uint8_t mcusr __attribute__ ((section (".noinit")));
-void wdt_init() __attribute__((naked)) __attribute__((section(".init3")));
+uint8_t mcusr __attribute__((section (".noinit")));
+void wdt_init() __attribute__((naked)) __attribute__((used)) __attribute__((section(".init3")));
 
 void wdt_init()
 {
