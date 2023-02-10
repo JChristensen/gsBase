@@ -48,28 +48,28 @@
 // SN Number of Cyclic Sleep Periods 14
 
 #include <avr/eeprom.h>
-#include <JC_Button.h>              //http://github.com/JChristensen/Button
-#include <DS3232RTC.h>              //http://github.com/JChristensen/DS3232RTC
-#include <Ethernet.h>               //http://arduino.cc/en/Reference/Ethernet
+#include <JC_Button.h>          // https://github.com/JChristensen/Button
+#include <DS3232RTC.h>          // https://github.com/JChristensen/DS3232RTC
+#include <Ethernet.h>
 #include <utility/w5100.h>
-#include <extEEPROM.h>              //http://github.com/JChristensen/extEEPROM
-#include <GroveStreams.h>           //http://github.com/JChristensen/GroveStreams
+#include <extEEPROM.h>          // https://github.com/JChristensen/extEEPROM
+#include <GroveStreams.h>       // https://github.com/JChristensen/GroveStreams
 #include <gsXBee.h>
-#include <LiquidCrystal.h>          //http://arduino.cc/en/Reference/LiquidCrystal (included with Arduino IDE)
-#include <MCP9808.h>                //http://github.com/JChristensen/MCP980X
-#include <MemoryFree.h>             //http://playground.arduino.cc/Code/AvailableMemory
-#include <movingAvg.h>              //http://github.com/JChristensen/movingAvg
-#include <MQTT_Mailer.h>            //https://github.com/JChristensen/MQTT_Mailer
+#include <LiquidCrystal.h>
+#include <MCP9808.h>            // https://github.com/JChristensen/MCP980X
+#include <MemoryFree.h>         // https://playground.arduino.cc/Code/AvailableMemory
+#include <movingAvg.h>          // https://github.com/JChristensen/movingAvg
+#include <MQTT_Mailer.h>        // https://github.com/JChristensen/MQTT_Mailer
 #include <NTP.h>
-#include <SPI.h>                    //http://arduino.cc/en/Reference/SPI
-#include <Streaming.h>              //http://arduiniana.org/libraries/streaming/
-#include <Time.h>                   //http://www.arduino.cc/playground/Code/Time
-#include <Timezone.h>               //http://github.com/JChristensen/Timezone
-#include <Wire.h>                   //http://arduino.cc/en/Reference/Wire
-#include <XBee.h>                   //http://code.google.com/p/xbee-arduino/
-#include "classes.h"                //part of this project
+#include <SPI.h>
+#include <Streaming.h>          // https://github.com/janelia-arduino/Streaming
+#include <TimeLib.h>            // https://github.com/PaulStoffregen/TimeTime
+#include <Timezone.h>           // https://github.com/JChristensen/Timezone
+#include <Wire.h>
+#include <XBee.h>               // https://github.com/andrewrapp/xbee-arduino
+#include "classes.h"            // part of this project
 
-//#define COUNT_LOOPS                 //count RUN state loops/sec
+//#define COUNT_LOOPS           // count RUN state loops/sec
 
 //pin assignments
 const uint8_t
@@ -128,6 +128,7 @@ LiquidCrystal lcd(LCD_RS, LCD_EN, LCD_D4, LCD_D5, LCD_D6, LCD_D7);
 extEEPROM eep(kbits_2, 1, 8);
 oneShotLED geigerLED;
 gsXBee XB;
+DS3232RTC RTC;
 
 Button btnSet(SET_BUTTON);
 Button btnUp(UP_BUTTON);
@@ -218,6 +219,7 @@ void setup()
 
     //device inits
     delay(1);
+    RTC.begin();
     digitalWrite(WIZ_RESET, HIGH);
     mcp9808.begin(MCP9808::twiClock400kHz);
     eep.begin(extEEPROM::twiClock400kHz);
@@ -240,7 +242,7 @@ void setup()
     }
     Serial << millis() << F(" RTC Time ");
     printDateTime(utc, tzUTC);
-    RTC.squareWave(SQWAVE_1_HZ);    //1Hz interrupts for timekeeping
+    RTC.squareWave(DS3232RTC::SQWAVE_1_HZ);    //1Hz interrupts for timekeeping
     delay(1000);
 
     //get MAC address & display
@@ -418,9 +420,9 @@ void loop()
     ntpStatus_t ntpStatus = NTP.run();      //run the NTP state machine
     if (ntpStatus == NTP_SYNC && NTP.lastSyncType == TYPE_PRECISE) {
         utc = NTP.now();
-        RTC.squareWave(SQWAVE_NONE);        //drives the INT/SQW pin high
+        RTC.squareWave(DS3232RTC::SQWAVE_NONE);        //drives the INT/SQW pin high
         RTC.set(utc + 1);
-        RTC.squareWave(SQWAVE_1_HZ);        //drives the INT/SQW pin low
+        RTC.squareWave(DS3232RTC::SQWAVE_1_HZ);        //drives the INT/SQW pin low
         Serial << millis() << F(" NTP set the RTC: ");
         printDateTime(utc, tzUTC);
         ++rtcSet;

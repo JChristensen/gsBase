@@ -4,8 +4,8 @@
 
 #include <util/atomic.h>
 #include <Arduino.h>
-#include <Time.h>
-#include <Streaming.h>    //http://arduiniana.org/libraries/streaming/
+#include <Streaming.h>          // https://github.com/janelia-arduino/Streaming
+#include <TimeLib.h>            // https://github.com/PaulStoffregen/TimeTime
 
 extern const char* tzUTC;
 extern gsXBee XB;
