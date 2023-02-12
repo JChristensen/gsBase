@@ -358,10 +358,10 @@ enum STATE_t { INIT, RUN, RESET_WARN, RESET_WAIT } STATE;
 
 void loop()
 {
-#ifdef COUNT_LOOPS
+    #ifdef COUNT_LOOPS
     static uint32_t loopCount;
     static uint32_t xbeeReads;
-#endif
+    #endif
     static char buf[96];
     static time_t utcLast;
     static time_t nextTransmit;          //time for next data transmission
@@ -375,30 +375,38 @@ void loop()
     utc = NTP.now();
     if (XB.read() == RX_DATA) {
         if ( STATE == RUN ) {
-            char rss[8];
-            itoa(XB.rss, rss, 10);
-            strcat(XB.payload, "&rss=");
-            strcat(XB.payload, rss);
-            if ( GS.send(XB.sendingCompID, XB.payload) == SEND_ACCEPTED ) {
-                Serial << millis() << F(" Send OK\n");
-#ifdef COUNT_LOOPS
-                Serial << millis() << F(" XBee reads=") << xbeeReads << endl;
-                xbeeReads = 0;
-#endif
+            if (XB.packetType == 'D') {
+                char rss[8];
+                itoa(XB.rss, rss, 10);
+                strcat(XB.payload, "&rss=");
+                strcat(XB.payload, rss);
+                if ( GS.send(XB.sendingCompID, XB.payload) == SEND_ACCEPTED ) {
+                    Serial << millis() << F(" GS Send OK\n");
+                    #ifdef COUNT_LOOPS
+                    Serial << millis() << F(" XBee reads=") << xbeeReads << endl;
+                    xbeeReads = 0;
+                    #endif
+                }
+                else {
+                    Serial << millis() << F(" GS Send FAIL\n");
+                }
+            }
+            else if (XB.packetType == 'M') {
+                mailer.sendmail(emailTo, XB.sendingCompID, XB.payload);
             }
             else {
-                Serial << millis() << F(" Send FAIL\n");
+                Serial << millis() << F("Unknown packet type: ") << XB.packetType << endl;
             }
         }
         else {
             Serial << millis() << F(" ...ignored\n");
         }
     }
-#ifdef COUNT_LOOPS
+    #ifdef COUNT_LOOPS
     else {
         ++xbeeReads;
     }
-#endif
+    #endif
 
     btnSet.read();
     btnUp.read();
