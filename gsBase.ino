@@ -375,7 +375,9 @@ void loop()
     utc = NTP.now();
     if (XB.read() == RX_DATA) {
         if ( STATE == RUN ) {
-            if (XB.packetType == 'D') {
+            
+            switch (XB.packetType) {
+            case 'D':
                 char rss[8];
                 itoa(XB.rss, rss, 10);
                 strcat(XB.payload, "&rss=");
@@ -390,12 +392,15 @@ void loop()
                 else {
                     Serial << millis() << F(" GS Send FAIL\n");
                 }
-            }
-            else if (XB.packetType == 'M') {
+                break;
+            
+            case 'M':
                 mailer.sendmail(emailTo, XB.sendingCompID, XB.payload);
-            }
-            else {
+                break;
+            
+            default:
                 Serial << millis() << F("Unknown packet type: ") << XB.packetType << endl;
+                break;
             }
         }
         else {
