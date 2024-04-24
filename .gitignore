@@ -27,6 +27,7 @@
 *.xls
 Thumbs.db
 *.session
+*.geany
 
 #always include
 !schematic.png
