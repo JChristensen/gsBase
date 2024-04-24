@@ -231,8 +231,19 @@ void setup()
     btnDn.begin();
     avgTemp.begin();
     brightness.begin();
+    
+    // check to see if user wants to ignore grovestreams,
+    // i.e. send no data to GS, just print to Serial instead.
+    btnSet.read();
+    if (btnSet.isPressed()) {
+        GS.ignoreGS = true;
+        Serial << millis() << F(" Ignore GS mode set\n");
+        lcd << F("Ignore GS mode");
+    }
+    while (btnSet.isPressed()) btnSet.read();   // wait for button release
 
     //RTC initialization
+    lcd.clear();
     lcd << F("RTC Sync");
     utc = RTC.get();                //try to read the time from the RTC
     if ( utc == 0 ) {               //couldn't read it, something wrong
@@ -298,7 +309,7 @@ void setup()
                 if (mcusr & _BV(PORF))  strcat(buf, "%20PORF");
                 ms = millis();
                 GS.send(XB.compID, buf);
-                INIT_STATE = INIT_WAIT_GS;
+                INIT_STATE = (GS.ignoreGS) ? INIT_NTP : INIT_WAIT_GS;
                 break;
 
             case INIT_WAIT_GS:
