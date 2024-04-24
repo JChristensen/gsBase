@@ -231,16 +231,6 @@ void setup()
     btnDn.begin();
     avgTemp.begin();
     brightness.begin();
-    
-    // check to see if user wants to ignore grovestreams,
-    // i.e. send no data to GS, just print to Serial instead.
-    btnSet.read();
-    if (btnSet.isPressed()) {
-        GS.ignoreGS = true;
-        Serial << millis() << F(" Ignore GS mode set\n");
-        lcd << F("Ignore GS mode");
-    }
-    while (btnSet.isPressed()) btnSet.read();   // wait for button release
 
     //RTC initialization
     lcd.clear();
@@ -309,7 +299,7 @@ void setup()
                 if (mcusr & _BV(PORF))  strcat(buf, "%20PORF");
                 ms = millis();
                 GS.send(XB.compID, buf);
-                INIT_STATE = (GS.ignoreGS) ? INIT_NTP : INIT_WAIT_GS;
+                INIT_STATE = INIT_WAIT_GS;
                 break;
 
             case INIT_WAIT_GS:
@@ -318,8 +308,9 @@ void setup()
                     INIT_STATE = INIT_WAIT_DISC;
                 }
                 else if ( millis() - ms >= 10000 ) {
-                    Serial << millis() << F(" GroveStreams send fail, resetting MCU\n");
-                    mcuReset();
+                    Serial << millis() << F(" GroveStreams send fail, setting BYPASS mode\n");
+                    GS.bypassMode = true;   // was: mcuReset();
+                    INIT_STATE = INIT_NTP;
                 }
                 break;
 
@@ -455,7 +446,7 @@ void loop()
         STATE = RESET_WARN;
     }
 
-    ethernetStatus_t gsStatus = GS.run();   // run the GroveStreams state machine
+    GS.run();                               // run the GroveStreams state machine
     if (STATE == RUN) mailer.run();         // run the mqtt mailer
     runDisplay(tF10, cpm);                  // run the LCD display
 
@@ -703,7 +694,7 @@ void runDisplay(int tF10, int cpm)
 
 uint8_t showSockStatus()
 {
-    uint8_t socketStat[MAX_SOCK_NUM];
+//  uint8_t socketStat[MAX_SOCK_NUM];
     uint8_t nAvailable = 0;
 
 //    uint16_t rtr = W5100.readRTR();    //retry time
@@ -713,7 +704,7 @@ uint8_t showSockStatus()
     for (uint8_t i = 0; i < MAX_SOCK_NUM; i++) {
         Serial << F("Sock_") << i;
         uint8_t s = W5100.readSnSR(i);
-        socketStat[i] = s;
+        //socketStat[i] = s;
         if ( s == 0 ) ++nAvailable;
         Serial << F(" 0x") << _HEX(s) << ' ' << W5100.readSnPORT(i) << F(" D:");
         uint8_t dip[4];
