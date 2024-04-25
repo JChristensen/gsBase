@@ -377,7 +377,7 @@ void loop()
     utc = NTP.now();
     if (XB.read() == RX_DATA) {
         if ( STATE == RUN ) {
-            
+
             switch (XB.packetType) {
             case 'D':
                 char rss[8];
@@ -385,7 +385,7 @@ void loop()
                 strcat(XB.payload, "&rss=");
                 strcat(XB.payload, rss);
                 if ( GS.send(XB.sendingCompID, XB.payload) == SEND_ACCEPTED ) {
-                    Serial << millis() << F(" GS Send OK\n");
+                    if (!GS.bypassMode) Serial << millis() << F(" GS Send OK\n");
                     #ifdef COUNT_LOOPS
                     Serial << millis() << F(" XBee reads=") << xbeeReads << endl;
                     xbeeReads = 0;
@@ -395,11 +395,11 @@ void loop()
                     Serial << millis() << F(" GS Send FAIL\n");
                 }
                 break;
-            
+
             case 'M':
                 mailer.sendmail(emailTo, XB.sendingCompID, XB.payload);
                 break;
-            
+
             default:
                 Serial << millis() << F("Unknown packet type: ") << XB.packetType << endl;
                 break;
@@ -482,6 +482,11 @@ void loop()
 
         if ( utc != utcLast ) {                 //once-per-second processing
             utcLast = utc;
+            // reset if we've been in bypass mode for half an hour
+            if (GS.bypassMode && (utc - startupTime >= 1800)) {
+                Serial << millis() << F(" BYPASS mode time limit, resetting MCU\n");
+                GS.mcuReset();
+            }
             XB.sendTimeSync(utc);
             uint8_t utcM = minute(utc);
             uint8_t utcS = second(utc);
