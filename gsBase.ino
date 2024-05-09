@@ -48,13 +48,13 @@
 // SN Number of Cyclic Sleep Periods 14
 
 #include <avr/eeprom.h>
-#include <JC_Button.h>          // https://github.com/JChristensen/Button
 #include <DS3232RTC.h>          // https://github.com/JChristensen/DS3232RTC
 #include <Ethernet.h>
 #include <utility/w5100.h>
-#include <extEEPROM.h>          // https://github.com/JChristensen/extEEPROM
 #include <GroveStreams.h>       // https://github.com/JChristensen/GroveStreams
 #include <gsXBee.h>
+#include <JC_Button.h>          // https://github.com/JChristensen/Button
+#include <JC_EEPROM.h>          // https://github.com/JChristensen/extEEPROM
 #include <LiquidCrystal.h>
 #include <MCP9808.h>            // https://github.com/JChristensen/MCP980X
 #include <MemoryFree.h>         // https://playground.arduino.cc/Code/AvailableMemory
@@ -63,7 +63,7 @@
 #include <NTP.h>
 #include <SPI.h>
 #include <Streaming.h>          // https://github.com/janelia-arduino/Streaming
-#include <TimeLib.h>            // https://github.com/PaulStoffregen/TimeTime
+#include <TimeLib.h>            // https://github.com/PaulStoffregen/Time
 #include <Timezone.h>           // https://github.com/JChristensen/Timezone
 #include <Wire.h>
 #include <XBee.h>               // https://github.com/andrewrapp/xbee-arduino
@@ -125,7 +125,7 @@ MCP9808 mcp9808(0);
 movingAvg avgTemp(6);
 movingAvg brightness(6);
 LiquidCrystal lcd(LCD_RS, LCD_EN, LCD_D4, LCD_D5, LCD_D6, LCD_D7);
-extEEPROM eep(kbits_2, 1, 8);
+JC_EEPROM eep(JC_EEPROM::kbits_2, 1, 8);
 oneShotLED geigerLED;
 gsXBee XB;
 DS3232RTC RTC;
@@ -222,7 +222,7 @@ void setup()
     RTC.begin();
     digitalWrite(WIZ_RESET, HIGH);
     mcp9808.begin(MCP9808::twiClock400kHz);
-    eep.begin(extEEPROM::twiClock400kHz);
+    eep.begin(JC_EEPROM::twiClock400kHz);
     lcd.begin(16, 2);
     lcd.clear();
     digitalWrite(LCD_BL, HIGH);
