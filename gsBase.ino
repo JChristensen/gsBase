@@ -111,8 +111,8 @@ const unsigned long PULSE_DUR(50);  //blink duration for the G-M one-shot LED, m
 
 // mqtt constants
 const char emailTo[] = "8108778656@msg.fi.google.com";  // email address to send to
-const char mqttBroker[] = "z1";                        // mqtt broker hostname
-const char clientID[] = "gw2";                          // unique ID for this client
+const char mqttBroker[] = "z21";                        // mqtt broker hostname
+const char clientID[] = "gw1";                          // unique ID for this client
 const char pubTopic[] = "sendmail";                     // mqtt publish topic
 
 //object instantiations
@@ -461,8 +461,8 @@ void loop()
             if ( nextTransmit <= utc ) nextTransmit += XB.txInterval * 60;
             startupTime = utc;
             Serial << millis() << F(" NTP initialized\n");
-            GEIGER.begin(gmIntervals[gmIntervalIdx], GM_POWER, utc);
-            mailer.begin(mqttBroker, 1883, pubTopic);
+            GEIGER.begin(gmIntervals[gmIntervalIdx], GM_POWER);
+            mailer.begin(mqttBroker, pubTopic);
             if (wdtEnable) wdt_enable(WDTO_8S);
             Serial << millis() << F(" Watchdog Timer ") << (wdtEnable ? F("ON\n") : F("OFF\n"));
             STATE = RUN;

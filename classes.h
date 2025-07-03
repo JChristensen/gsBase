@@ -22,7 +22,7 @@ ISR(INT0_vect)
 class geiger
 {
     public:
-        void begin(int sampleInterval, uint8_t powerPin, time_t utc);
+        void begin(int sampleInterval, uint8_t powerPin);
         bool run(int* count, time_t utc);
         bool pulse();
         void setInterval(int sampleInterval);
@@ -38,7 +38,7 @@ class geiger
 enum gmStates_t { gmINIT, gmWAIT, gmWARMUP, gmCOLLECT, gmCONTINUOUS } gmState;
 
 //sample interval in minutes, current utc
-void geiger::begin(int sampleInterval, uint8_t powerPin, time_t utc)
+void geiger::begin(int sampleInterval, uint8_t powerPin)
 {
     EICRA |= _BV(ISC01);                 //INT0 on falling edge
     EIFR |= _BV(INTF0);                  //ensure interrupt flag is cleared (setting ISC bits can set it)
